@@ -21,18 +21,36 @@ import { formatFileTime } from './format';
  *   calendar/deleted/       —— 用户删除（软删除）的事项
  *
  * 与桌面端差异：
- *   - 桌面端可任选存储文件夹；移动端固定使用应用数据目录（$APPDATA/calendar），
+ *   - 桌面端可任选磁盘文件夹；移动端在应用数据目录（$APPDATA）下由用户指定
+ *     任意子目录作为数据根目录（默认 calendar），应用设置单独存于 $APPDATA/settings.json，
  *     目录结构与文件格式一致，数据可直接拷贝迁移。
  *   - 桌面端用 FileSystemWatcher 监听 items/ 外部改动；移动端用
  *     @tauri-apps/plugin-fs 自带的 watch（notify 后端，300ms 去抖），
  *     并额外提供轮询兜底 + 每次写操作后主动通知刷新。
  */
 
-/** 存储根目录（相对 $APPDATA）。 */
-export const ROOT_DIR = 'calendar';
-export const ITEMS_DIR = 'calendar/items';
-export const ARCHIVE_DIR = 'calendar/archive';
-export const DELETED_DIR = 'calendar/deleted';
+/** 默认数据根目录（应用数据目录下的子目录，可被用户随意指定）。 */
+export const DEFAULT_ROOT = 'calendar';
+
+/**
+ * 净化用户输入的数据根目录：统一斜杠、去首尾空白与斜杠；
+ * 拒绝空值、`.`/`..`、Windows 非法字符。返回规范化的相对路径。
+ */
+export function sanitizeRootPath(input: string): string {
+  const cleaned = input
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+|\/+$/g, '');
+  if (!cleaned) {
+    throw new Error('目录名不能为空。');
+  }
+  for (const seg of cleaned.split('/')) {
+    if (!seg || seg === '.' || seg === '..' || /[\\:*?"<>|]/.test(seg)) {
+      throw new Error(`目录名「${seg}」不合法，请使用字母、数字、中文或 - _ 。`);
+    }
+  }
+  return cleaned;
+}
 
 /** 长期事项哨兵年份（与桌面端 MarkLongTerm 一致）。 */
 export const LONG_TERM_SENTINEL = new Date(2099, 0, 1, 12, 0, 0);
@@ -99,21 +117,45 @@ class FolderStore {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** 当前数据根目录（相对 $APPDATA，如 "calendar"），可被用户指定。 */
+  private root = DEFAULT_ROOT;
+  private itemsDir = `${DEFAULT_ROOT}/items`;
+  private archiveDir = `${DEFAULT_ROOT}/archive`;
+  private deletedDir = `${DEFAULT_ROOT}/deleted`;
+
   /** 存储目录打开/切换后触发（初始化后立即触发一次）。 */
   onChange: (() => void) | null = null;
 
   /** items/ 目录内容变化后触发（去抖），含应用外部改动。 */
   onItemsChanged: (() => void) | null = null;
 
+  /** 当前数据根目录（相对 $APPDATA）。 */
+  getRoot(): string {
+    return this.root;
+  }
+
+  /**
+   * 初始化 / 切换数据根目录：净化目录名、重建目录、重启监听，
+   * 完成后触发 onChange（App 借此刷新各视图）。
+   */
+  async setRoot(root: string): Promise<void> {
+    const cleaned = sanitizeRootPath(root);
+    this.root = cleaned;
+    this.itemsDir = `${cleaned}/items`;
+    this.archiveDir = `${cleaned}/archive`;
+    this.deletedDir = `${cleaned}/deleted`;
+    await this.open();
+  }
+
   async open(): Promise<void> {
-    await mkdir(ITEMS_DIR, { baseDir: BaseDirectory.AppData, recursive: true });
-    await mkdir(DELETED_DIR, { baseDir: BaseDirectory.AppData, recursive: true });
+    this.stopWatching();
+    await mkdir(this.itemsDir, { baseDir: BaseDirectory.AppData, recursive: true });
+    await mkdir(this.deletedDir, { baseDir: BaseDirectory.AppData, recursive: true });
 
     // 监听 items/ 目录（notify 后端，300ms 去抖，对应桌面端 FileSystemWatcher）
     try {
-      this.unwatch?.();
       this.unwatch = await watch(
-        ITEMS_DIR,
+        this.itemsDir,
         () => this.scheduleReload(),
         { baseDir: BaseDirectory.AppData, recursive: false, delayMs: 300 },
       );
@@ -128,6 +170,16 @@ class FolderStore {
     }
 
     this.onChange?.();
+  }
+
+  /** 停止目录监听与轮询（切换根目录前调用）。 */
+  private stopWatching(): void {
+    this.unwatch?.();
+    this.unwatch = null;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
   }
 
   /** 未删除事项，开始时间落在 [from, to)，含归档项（桌面端 GetUpcoming）。 */
@@ -166,7 +218,7 @@ class FolderStore {
 
   /** 新增事项：写入 items/，返回文件名（桌面端 Insert）。 */
   async insert(item: ScheduleEvent): Promise<string> {
-    const fileName = await this.writeItemFile(item, ITEMS_DIR);
+    const fileName = await this.writeItemFile(item, this.itemsDir);
     this.notifyChanged();
     return fileName;
   }
@@ -177,7 +229,7 @@ class FolderStore {
    */
   async update(oldItem: ScheduleEvent, newItem: ScheduleEvent): Promise<string> {
     await this.deleteItemFileAnywhere(oldItem);
-    const directory = isExpired(newItem) ? await this.getArchiveDirectory(newItem) : ITEMS_DIR;
+    const directory = isExpired(newItem) ? await this.getArchiveDirectory(newItem) : this.itemsDir;
     const fileName = await this.writeItemFile(newItem, directory);
     this.notifyChanged();
     return fileName;
@@ -189,8 +241,8 @@ class FolderStore {
     const source = await this.findItemFile(item);
     if (!source) return null;
 
-    await mkdir(DELETED_DIR, { baseDir: BaseDirectory.AppData, recursive: true });
-    const destination = await this.uniquePath(`${DELETED_DIR}/${item.fileName}`);
+    await mkdir(this.deletedDir, { baseDir: BaseDirectory.AppData, recursive: true });
+    const destination = await this.uniquePath(`${this.deletedDir}/${item.fileName}`);
     await rename(source, destination, {
       oldPathBaseDir: BaseDirectory.AppData,
       newPathBaseDir: BaseDirectory.AppData,
@@ -283,13 +335,13 @@ class FolderStore {
 
   private async getArchiveDirectory(item: ScheduleEvent): Promise<string> {
     const year = new Date(item.startsAt).getFullYear();
-    return `${ARCHIVE_DIR}/${year}`;
+    return `${this.archiveDir}/${year}`;
   }
 
   /** 在 items/ 和所有 archive/YYYY/ 中查找文件，返回相对 $APPDATA 的路径。 */
   private async findItemFile(item: ScheduleEvent): Promise<string | null> {
     if (!item.fileName) return null;
-    const inItems = `${ITEMS_DIR}/${item.fileName}`;
+    const inItems = `${this.itemsDir}/${item.fileName}`;
     if (await exists(inItems, { baseDir: BaseDirectory.AppData })) {
       return inItems;
     }
@@ -310,12 +362,12 @@ class FolderStore {
 
   /** items/ 下所有 .md 文件。 */
   private async enumerateItemFiles(): Promise<{ path: string; name: string }[]> {
-    return this.listMd(ITEMS_DIR);
+    return this.listMd(this.itemsDir);
   }
 
   /** items/ + 所有 archive/YYYY/ 下的 .md 文件（桌面端 EnumerateAllFiles）。 */
   private async enumerateAllFiles(): Promise<{ path: string; name: string }[]> {
-    const all = await this.listMd(ITEMS_DIR);
+    const all = await this.listMd(this.itemsDir);
     for (const dir of await this.enumerateArchiveDirectories()) {
       all.push(...(await this.listMd(dir)));
     }
@@ -324,8 +376,8 @@ class FolderStore {
 
   private async enumerateArchiveDirectories(): Promise<string[]> {
     try {
-      const entries = await readDir(ARCHIVE_DIR, { baseDir: BaseDirectory.AppData });
-      return entries.filter((e) => e.isDirectory).map((e) => `${ARCHIVE_DIR}/${e.name}`);
+      const entries = await readDir(this.archiveDir, { baseDir: BaseDirectory.AppData });
+      return entries.filter((e) => e.isDirectory).map((e) => `${this.archiveDir}/${e.name}`);
     } catch {
       return [];
     }

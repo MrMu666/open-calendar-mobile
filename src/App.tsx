@@ -32,8 +32,11 @@ export default function App() {
   useEffect(() => {
     store.onItemsChanged = refresh;
     store.onChange = refresh;
-    void store.open();
-    void loadSettings().then(setSettings);
+    // 先读设置（含数据目录），再按设置初始化存储
+    void loadSettings().then((s) => {
+      setSettings(s);
+      return store.setRoot(s.dataDir).catch(() => store.setRoot(DEFAULT_SETTINGS.dataDir));
+    });
     return () => {
       store.onItemsChanged = null;
       store.onChange = null;

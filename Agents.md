@@ -9,7 +9,7 @@
 - 日历月视图：6×7 网格、农历显示、事项圆点、选中日日程列表
 - 事项列表：未到期事项、优先级/标签、展开详情、设为长期/已完成、删除
 - 编辑器：底部弹层，标题/开始/截止时间、标签、优先级、Markdown 内容
-- 设置：亮色/暗色主题切换、强调色（桌面端的"存储文件夹/开机自启/背景色/透明度"在移动端无对应项）
+- 设置：亮色/暗色主题切换（默认亮色）、强调色、自定义数据存储目录（桌面端的"开机自启/背景色/透明度"在移动端无对应项）
 
 ## 技术栈
 
@@ -41,7 +41,7 @@ src/
     lunar.ts                 # 农历（lunar-javascript 封装，含闰月处理）
     format.ts                # 时间格式化（yyyyMMdd-HHmmss / 中文显示）
     tags.ts                  # 标签（工作/生活/学习/健康/财务）
-    settings.ts              # 设置读写（$APPDATA/calendar/settings.json）
+    settings.ts              # 设置读写（$APPDATA/settings.json，与数据目录独立）
   components/
     TabBar.tsx / CalendarView.tsx / TasksView.tsx / ItemEditor.tsx / SettingsView.tsx / ItemCard.tsx
 src-tauri/
@@ -53,11 +53,16 @@ src-tauri/
 ## 关键架构决策
 
 ### 数据存储：文件夹 Markdown（与桌面端完全一致，可迁移）
-- **唯一存储是 `store.ts`（FolderStore 单例）**：`$APPDATA/calendar/items/*.md`，文件名即数据，
+- **唯一存储是 `store.ts`（FolderStore 单例）**：数据根目录默认 `$APPDATA/calendar/`，
+  可由用户在设置页**随意指定为应用数据目录下的任意子目录**（`store.setRoot()`，
+  切换后仅显示新目录事项，旧目录数据保留）。根目录下 `items/*.md` 文件名即数据，
   格式 `items/yyyyMMdd-HHmmss_yyyyMMdd-HHmmss_P<级别>_<净化标题>[_<标签>].md`
   （规则与桌面端 `存储目录设计.md` 相同）。
-- **归档**：截止已过的事项移入 `calendar/archive/YYYY/`；删除进 `calendar/deleted/`（软删除）。
+- **归档**：截止已过的事项移入 `<root>/archive/YYYY/`；删除进 `<root>/deleted/`（软删除）。
   `Update(old, new)` 按新截止时间决定落点（未来→items/，过期→archive/）。
+- **应用设置与数据分离**：`settings.json` 固定存于 `$APPDATA` 根，只保存
+  主题 / 强调色 / 数据目录位置三项，不随数据目录迁移（`loadSettings` 会从旧位置
+  `calendar/settings.json` 做一次性迁移读取）。
 - **查询边界**：事项列表只读 items/（未过期）；日历圆点/选中日日程同时读 items/+archive/，
   已完成事项仍显示在它开始的那天，可继续编辑/设为长期/删除（与桌面端 GetUpcoming 语义一致）。
 - **文件监听**：用 `@tauri-apps/plugin-fs` 的 `watch`（notify 后端，300ms 去抖，需 Rust 侧
@@ -103,12 +108,15 @@ src-tauri/
 - **不要随意收紧/放宽**：前端所有 IO 都走这些权限；Android 上 `$APPDATA` 即应用私有目录。
 
 ### 与桌面端的差异（刻意为之）
-- 移动端固定用应用数据目录（`$APPDATA/calendar/`），无"选择存储文件夹"；数据可直接从桌面端
-  `items/` 拷贝迁移。
+- 移动端在应用数据目录（`$APPDATA`）下由用户指定数据根目录（默认 `calendar/`），
+  不能选系统任意文件夹（Android SAF 在 Tauri v2 的 dialog/fs 插件中不完整）；
+  数据可直接从桌面端 `items/` 拷贝迁移。
 - 无开机自启、无系统托盘、无玻璃壁纸效果（桌面端核心特色，移动端不适用）。
 - 桌面端用 `FileSystemWatcher`；移动端用 fs 插件 watch + 轮询兜底。
-- 设置只保留外观部分（亮/暗主题 + 强调色），存 `calendar/settings.json`（与数据同目录）。
+- 设置：亮/暗主题（**默认亮色**）+ 强调色 + 数据目录，存 `$APPDATA/settings.json`（与数据目录独立）。
   主题在 `App.tsx` 切换 `theme-dark`/`theme-light` class，两套配色定义在 `App.css` 变量区。
+  **`.app` 必须声明 `color: var(--text)`**：`html/body` 的 `var(--text)` 解析自 `:root`（暗色值），
+  不在此处覆盖时所有靠继承取色的元素在亮色下仍为白字（已踩坑）。
 - **Android 状态栏**：Tauri 默认 `enableEdgeToEdge()` 沉浸式，`.app` 已加
   `padding-top: env(safe-area-inset-top)` 避让顶部状态栏（底部 TabBar/弹层同样处理）。
 - **Android 图标**：桌面端图标内容满幅（98%），直接做自适应图标前景会视觉过大。

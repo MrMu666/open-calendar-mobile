@@ -29,7 +29,7 @@ export function resolveTagColor(tags: string): string {
   return '#64748B';
 }
 
-/** 事项条背景色：P1=20% 红、P2=10% 红、默认近白（桌面端 ItemBackground）。 */
+/** 事项条背景色：P1=20% 红、P2=10% 红、默认随主题的卡片色（桌面端 ItemBackground）。 */
 export function itemBackground(priority: number): string {
   switch (priority) {
     case 1:
@@ -37,7 +37,8 @@ export function itemBackground(priority: number): string {
     case 2:
       return 'rgba(255, 77, 77, 0.1)';
     default:
-      return 'rgba(255, 255, 255, 0.12)';
+      // 用 CSS 变量，亮色/暗色下各自适配
+      return 'var(--card-bg)';
   }
 }
 

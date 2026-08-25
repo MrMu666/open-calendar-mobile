@@ -94,6 +94,8 @@ textarea {
   flex-direction: column;
   height: 100dvh;
   background: var(--panel-bg);
+  /* 主题基础文字色：让所有靠继承取色的元素（弹层、输入框、详情等）随主题变色 */
+  color: var(--text);
   /* 避让 Android 顶部状态栏（enableEdgeToEdge 沉浸式） */
   padding-top: env(safe-area-inset-top, 0px);
 }
@@ -664,6 +666,28 @@ textarea {
   flex: 1;
   min-width: 140px;
   accent-color: var(--accent);
+}
+
+.dir-row {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.dir-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.dir-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .theme-toggle {
