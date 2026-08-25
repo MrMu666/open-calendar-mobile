@@ -64,6 +64,11 @@ jobs:
       - name: Init Android project
         run: npm run tauri android init
 
+      - name: Generate app icons into Android project
+        # tauri icon 在 gen/android 已存在时会把图标直接写入
+        # gen/android/app/src/main/res/（init 模板自带默认图标，必须覆盖）
+        run: npm run tauri icon
+
       - name: Setup Android signing
         # 从 GitHub Secrets 恢复 keystore 与密码，写入官方约定的 keystore.properties
         env:
@@ -94,17 +99,17 @@ jobs:
           mkdir -p apks
           for f in src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk; do
             [ -f "$f" ] || continue
-            abi=$(basename "$(dirname "$f")")
+            abi=$(basename "$(dirname "$(dirname "$f")")")
             cp "$f" "apks/open-calendar-mobile-${abi}-v${{ steps.bump.outputs.new_version }}.apk"
           done
           ls -la apks/
           test "$(ls apks/*.apk 2>/dev/null | wc -l)" -ge 1
 
       - name: Tag release version
-        # tag push 不匹配 branches 过滤器，不会重复触发本 workflow
+        # tag push 不匹配 branches 过滤器，不会重复触发本 workflow；已存在则跳过
         run: |
-          git tag "v${{ steps.bump.outputs.new_version }}"
-          git push origin "v${{ steps.bump.outputs.new_version }}"
+          git tag "v${{ steps.bump.outputs.new_version }}" || echo "tag 已存在"
+          git push origin "v${{ steps.bump.outputs.new_version }}" || echo "tag 已推送"
 
       - name: Create GitHub Release with APKs
         # Release 资产直接下载原始 .apk 文件（Artifact 下载才是 zip，故不用它）
@@ -115,13 +120,9 @@ jobs:
           body: |
             ## OpenCalendar v${{ steps.bump.outputs.new_version }}
 
-            推送自动构建，按架构拆分 APK：
+            推送自动构建，按架构拆分 APK（文件名含 ABI 标识）。
 
-            - `aarch64` — 64 位 ARM（arm64-v8a，主流手机）
-            - `armv7` — 32 位 ARM（armeabi-v7a，老设备）
-            - `x86_64` — 64 位 x86（模拟器）
-            - `i686` — 32 位 x86（模拟器）
-
+            手机一般选 **arm64-v8a**（64 位，主流）；老设备选 **armeabi-v7a**；模拟器选 x86_64 / x86。
             下载对应你设备的 APK 直接安装。
           files: apks/*.apk
           fail_on_unmatched_files: true

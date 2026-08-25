@@ -69,8 +69,15 @@ src-tauri/
 - **注意**：CI 的 bump 提交会 push 到仓库，本地需 pull 后再改代码，避免冲突。
 
 ### CI 分发：按架构拆分 APK + GitHub Release
-- `tauri android build -- --apk --split-per-abi` 为 aarch64/armv7/i686/x86_64 各产出一个
-  独立 APK（输出在 `gen/android/app/build/outputs/apk/<abi>/release/`）。
+- `tauri android build -- --apk --split-per-abi` 为各 ABI 各产出一个独立 APK
+  （输出在 `gen/android/app/build/outputs/apk/<abi>/release/`，abi 目录名如
+  `arm64-v8a`/`armeabi-v7a`/`x86_64`/`x86`）。Collect 步骤用
+  `apk/*/release/*.apk` + 两级 `dirname` 的 `basename` 提取 abi 名（只取一级会
+  拿到 `release` 导致同名覆盖、release 只剩一个 APK——已踩坑）。
+- **图标必须 init 后再跑一次 `tauri icon`**：`tauri icon` 在
+  `gen/android/app/src/main/res/` 已存在时会把图标直接写进 Android 工程；
+  否则只写 `src-tauri/icons/android/`，而 `tauri android init` 模板自带默认图标，
+  不覆盖则 APK 图标是 Tauri 默认 logo（已踩坑）。
 - **不用 `actions/upload-artifact`**：Artifact 下载永远是 zip 压缩包；改由
   `softprops/action-gh-release` 把 APK 作为 **Release 资产**上传，直接从 Release 页
   下载原始 `.apk` 文件。每次构建打 `v<patch 版本>` tag 并创建 Release。
