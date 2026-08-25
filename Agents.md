@@ -55,7 +55,11 @@ src-tauri/
 ### 数据存储：文件夹 Markdown（与桌面端完全一致，可迁移）
 - **唯一存储是 `store.ts`（FolderStore 单例）**：数据根目录默认 `$APPDATA/calendar/`，
   可由用户在设置页**随意指定为应用数据目录下的任意子目录**（`store.setRoot()`，
-  切换后仅显示新目录事项，旧目录数据保留）。根目录下 `items/*.md` 文件名即数据，
+  切换后仅显示新目录事项，旧目录数据保留）。
+  选择入口是 `FolderPicker.tsx` 应用内目录浏览器（底部弹层：面包屑/进入/返回上级/新建
+  文件夹）——Tauri v2 的 dialog/fs 插件在 Android 上不支持系统 SAF 目录选择，
+  **不要试图换成 `@tauri-apps/plugin-dialog` 的目录选择**（Android 上返回 content://
+  URI、无持久权限、fs 插件不可读写）。根目录下 `items/*.md` 文件名即数据，
   格式 `items/yyyyMMdd-HHmmss_yyyyMMdd-HHmmss_P<级别>_<净化标题>[_<标签>].md`
   （规则与桌面端 `存储目录设计.md` 相同）。
 - **归档**：截止已过的事项移入 `<root>/archive/YYYY/`；删除进 `<root>/deleted/`（软删除）。

@@ -4,6 +4,7 @@ import { appDataDir } from '@tauri-apps/api/path';
 import type { Theme, UserSettings } from '../lib/settings';
 import { ACCENT_PRESETS, DEFAULT_SETTINGS } from '../lib/settings';
 import { sanitizeRootPath, store } from '../lib/store';
+import FolderPicker from './FolderPicker';
 
 interface Props {
   settings: UserSettings;
@@ -14,10 +15,9 @@ interface Props {
 /** 设置页：外观（亮/暗主题、强调色）+ 数据（存储目录）+ 关于。 */
 export default function SettingsView({ settings, onChange, refreshTick }: Props) {
   const [appDir, setAppDir] = useState('');
-  const [dirInput, setDirInput] = useState(settings.dataDir);
-  const [dirError, setDirError] = useState('');
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [version, setVersion] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     appDataDir()
@@ -27,11 +27,6 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
       .then(setVersion)
       .catch(() => setVersion(''));
   }, []);
-
-  useEffect(() => {
-    setDirInput(settings.dataDir);
-    setDirError('');
-  }, [settings.dataDir]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,11 +43,11 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     try {
       const cleaned = sanitizeRootPath(name);
       await store.setRoot(cleaned);
-      setDirInput(cleaned);
-      setDirError('');
       onChange({ dataDir: cleaned });
+      setPickerOpen(false);
     } catch (err) {
-      setDirError(err instanceof Error ? err.message : '目录名不合法。');
+      // 选择器内已保证合法，此处兜底
+      console.error('切换数据目录失败：', err);
     }
   };
 
@@ -101,24 +96,13 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
           <span className="setting-value mono">{settings.dataDir}</span>
         </div>
         <div className="dir-row">
-          <input
-            className="dir-input"
-            value={dirInput}
-            onChange={(e) => {
-              setDirInput(e.target.value);
-              setDirError('');
-            }}
-            placeholder="如 calendar"
-            aria-label="存储目录名"
-          />
-          <button type="button" className="btn small primary" onClick={() => void applyDir(dirInput)}>
-            切换
+          <button type="button" className="btn small primary" onClick={() => setPickerOpen(true)}>
+            选择目录…
           </button>
           <button type="button" className="btn small" onClick={() => void applyDir(DEFAULT_SETTINGS.dataDir)}>
             恢复默认
           </button>
         </div>
-        {dirError && <p className="editor-error">{dirError}</p>}
         {appDir && (
           <div className="setting-info">
             <span className="setting-label">完整路径</span>
@@ -132,6 +116,14 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
           结构与桌面版一致。切换目录后仅显示新目录中的事项，原目录数据保留在设备上；
           应用设置保存在独立的 settings.json，不随目录迁移。
         </p>
+
+        {pickerOpen && (
+          <FolderPicker
+            initialPath={settings.dataDir}
+            onPick={(p) => void applyDir(p)}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
         <div className="setting-info">
           <span className="setting-label">未归档事项</span>
           <span className="setting-value">{itemCount === null ? '…' : itemCount} 条</span>
