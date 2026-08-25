@@ -53,13 +53,15 @@ src-tauri/
 ## 关键架构决策
 
 ### 数据存储：文件夹 Markdown（与桌面端完全一致，可迁移）
-- **唯一存储是 `store.ts`（FolderStore 单例）**：数据根目录默认 `$APPDATA/calendar/`，
-  可由用户在设置页**随意指定为应用数据目录下的任意子目录**（`store.setRoot()`，
-  切换后仅显示新目录事项，旧目录数据保留）。
-  选择入口是 `FolderPicker.tsx` 应用内目录浏览器（底部弹层：面包屑/进入/返回上级/新建
-  文件夹）——Tauri v2 的 dialog/fs 插件在 Android 上不支持系统 SAF 目录选择，
-  **不要试图换成 `@tauri-apps/plugin-dialog` 的目录选择**（Android 上返回 content://
-  URI、无持久权限、fs 插件不可读写）。根目录下 `items/*.md` 文件名即数据，
+- **唯一存储是 `store.ts`（FolderStore 单例）**，两种后端（`StorageAdapter` 抽象）：
+  - **appData（默认）**：`$APPDATA` 下任意子目录（默认 `calendar`），走
+    `@tauri-apps/plugin-fs`，可 watch 文件变化。
+  - **external（用户选定）**：通过系统 SAF 目录选择器（`tauri-plugin-scoped-storage`
+    的 `pickFolder()`，从手机存储根开始浏览）选定任意外部目录（如根目录/Download），
+    内部用 content:// 树 URI + `takePersistableUriPermission`，权限跨重启持久、
+    仅限所选文件夹；不支持 watch，仅轮询刷新。
+  切换后仅显示新目录事项，旧目录数据保留。**不要用 `@tauri-apps/plugin-dialog` 的
+  目录选择**（Android 上返回 content:// URI、无持久权限、fs 插件不可读写，已踩坑）。根目录下 `items/*.md` 文件名即数据，
   格式 `items/yyyyMMdd-HHmmss_yyyyMMdd-HHmmss_P<级别>_<净化标题>[_<标签>].md`
   （规则与桌面端 `存储目录设计.md` 相同）。
 - **归档**：截止已过的事项移入 `<root>/archive/YYYY/`；删除进 `<root>/deleted/`（软删除）。
@@ -117,10 +119,16 @@ src-tauri/
   数据可直接从桌面端 `items/` 拷贝迁移。
 - 无开机自启、无系统托盘、无玻璃壁纸效果（桌面端核心特色，移动端不适用）。
 - 桌面端用 `FileSystemWatcher`；移动端用 fs 插件 watch + 轮询兜底。
-- 设置：亮/暗主题（**默认亮色**）+ 强调色 + 数据目录，存 `$APPDATA/settings.json`（与数据目录独立）。
+- 设置：亮/暗主题（**默认亮色**）+ 强调色 + 数据目录（appData 子目录 或 SAF 外部目录），
+  存 `$APPDATA/settings.json`（与数据目录独立）。external 模式的 `folderId` 由
+  scoped-storage 插件持久化，应用启动时用 `listFolders()` 校验句柄仍有效，失效则回退 appData。
   主题在 `App.tsx` 切换 `theme-dark`/`theme-light` class，两套配色定义在 `App.css` 变量区。
   **`.app` 必须声明 `color: var(--text)`**：`html/body` 的 `var(--text)` 解析自 `:root`（暗色值），
   不在此处覆盖时所有靠继承取色的元素在亮色下仍为白字（已踩坑）。
+- **SAF 外部目录后端注意事项**：`store.ts` 的 `scopedStorageAdapter.rename` 用插件的
+  `move`（复制+删除）而非 `rename`（SAF `DocumentFile.renameTo` 不能跨父目录移动，
+  而归档/软删除都要跨目录）；写入用 `writeTextFile(..., { recursive: true })`；
+  路径必须相对所选文件夹根（插件拒绝 `..`/绝对路径）。
 - **Android 状态栏**：Tauri 默认 `enableEdgeToEdge()` 沉浸式，`.app` 已加
   `padding-top: env(safe-area-inset-top)` 避让顶部状态栏（底部 TabBar/弹层同样处理）。
 - **Android 图标**：桌面端图标内容满幅（98%），直接做自适应图标前景会视觉过大。

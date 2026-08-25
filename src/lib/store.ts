@@ -1,14 +1,15 @@
 import {
   BaseDirectory,
-  exists,
-  mkdir,
-  readDir,
-  readTextFile,
-  remove,
-  rename,
+  exists as fsExists,
+  mkdir as fsMkdir,
+  readDir as fsReadDir,
+  readTextFile as fsReadTextFile,
+  remove as fsRemove,
+  rename as fsRename,
   watch,
-  writeTextFile,
+  writeTextFile as fsWriteTextFile,
 } from '@tauri-apps/plugin-fs';
+import * as scoped from 'tauri-plugin-scoped-storage-api';
 import type { ScheduleEvent } from '../types';
 import { formatFileTime } from './format';
 
@@ -16,20 +17,21 @@ import { formatFileTime } from './format';
  * 文件夹存储 —— 桌面端 CalendarApp.Data.FolderItemStore 的移动端移植。
  * 数据规则与桌面端完全一致（见根目录 存储目录设计.md）：
  *
- *   calendar/items/YYYYMMDD-HHmmss_YYYYMMDD-HHmmss_P<级别>_<净化标题>[_<标签>].md
- *   calendar/archive/YYYY/  —— 截止时间已过的事项，按开始年份归档
- *   calendar/deleted/       —— 用户删除（软删除）的事项
+ *   <root>/items/YYYYMMDD-HHmmss_YYYYMMDD-HHmmss_P<级别>_<净化标题>[_<标签>].md
+ *   <root>/archive/YYYY/  —— 截止时间已过的事项，按开始年份归档
+ *   <root>/deleted/       —— 用户删除（软删除）的事项
  *
- * 与桌面端差异：
- *   - 桌面端可任选磁盘文件夹；移动端在应用数据目录（$APPDATA）下由用户指定
- *     任意子目录作为数据根目录（默认 calendar），应用设置单独存于 $APPDATA/settings.json，
- *     目录结构与文件格式一致，数据可直接拷贝迁移。
- *   - 桌面端用 FileSystemWatcher 监听 items/ 外部改动；移动端用
- *     @tauri-apps/plugin-fs 自带的 watch（notify 后端，300ms 去抖），
- *     并额外提供轮询兜底 + 每次写操作后主动通知刷新。
+ * 两种存储后端（StorageAdapter）：
+ *   - appData：应用数据目录（$APPDATA）下的任意子目录（默认 calendar），
+ *     通过 @tauri-apps/plugin-fs 读写，可监听文件变化（watch + 轮询兜底）。
+ *   - external：用户通过系统 SAF 目录选择器选定的外部目录（如手机根目录/Download），
+ *     通过 tauri-plugin-scoped-storage 读写（内部用 content:// 树 URI +
+ *     takePersistableUriPermission，权限跨重启持久），不支持 watch，仅轮询刷新。
+ *
+ * 目录结构与文件格式两种后端完全一致，数据可直接互相拷贝迁移。
  */
 
-/** 默认数据根目录（应用数据目录下的子目录，可被用户随意指定）。 */
+/** 默认数据根目录（appData 模式：应用数据目录下的子目录）。 */
 export const DEFAULT_ROOT = 'calendar';
 
 /**
@@ -54,6 +56,93 @@ export function sanitizeRootPath(input: string): string {
 
 /** 长期事项哨兵年份（与桌面端 MarkLongTerm 一致）。 */
 export const LONG_TERM_SENTINEL = new Date(2099, 0, 1, 12, 0, 0);
+
+// ── 存储后端抽象 ────────────────────────────────────────
+
+export interface DirEntry {
+  name: string;
+  isFile: boolean;
+  isDir: boolean;
+}
+
+/** 存储后端：所有路径均为相对各后端根目录的路径。 */
+export interface StorageAdapter {
+  mkdir(path: string): Promise<void>;
+  readDir(path: string): Promise<DirEntry[]>;
+  readTextFile(path: string): Promise<string>;
+  writeTextFile(path: string, contents: string): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+  remove(path: string): Promise<void>;
+}
+
+/** appData 后端：@tauri-apps/plugin-fs + BaseDirectory.AppData。 */
+const appDataAdapter: StorageAdapter = {
+  async mkdir(path) {
+    await fsMkdir(path, { baseDir: BaseDirectory.AppData, recursive: true });
+  },
+  async readDir(path) {
+    return (await fsReadDir(path, { baseDir: BaseDirectory.AppData })).map((e) => ({
+      name: e.name,
+      isFile: !!e.isFile,
+      isDir: !!e.isDirectory,
+    }));
+  },
+  async readTextFile(path) {
+    return fsReadTextFile(path, { baseDir: BaseDirectory.AppData });
+  },
+  async writeTextFile(path, contents) {
+    await fsWriteTextFile(path, contents, { baseDir: BaseDirectory.AppData });
+  },
+  async exists(path) {
+    return fsExists(path, { baseDir: BaseDirectory.AppData });
+  },
+  async rename(oldPath, newPath) {
+    await fsRename(oldPath, newPath, {
+      oldPathBaseDir: BaseDirectory.AppData,
+      newPathBaseDir: BaseDirectory.AppData,
+    });
+  },
+  async remove(path) {
+    await fsRemove(path, { baseDir: BaseDirectory.AppData });
+  },
+};
+
+/** external 后端：tauri-plugin-scoped-storage（SAF 目录句柄）。 */
+function scopedStorageAdapter(folderId: string): StorageAdapter {
+  return {
+    async mkdir(path) {
+      await scoped.mkdir(folderId, path, true);
+    },
+    async readDir(path) {
+      return (await scoped.readDir(folderId, path || undefined)).map((e) => ({
+        name: e.name,
+        isFile: e.isFile,
+        isDir: e.isDir,
+      }));
+    },
+    async readTextFile(path) {
+      return scoped.readTextFile(folderId, path);
+    },
+    async writeTextFile(path, contents) {
+      // recursive: true —— SAF 写入需自动创建中间目录
+      await scoped.writeTextFile(folderId, path, contents, { recursive: true });
+    },
+    async exists(path) {
+      return scoped.exists(folderId, path);
+    },
+    async rename(oldPath, newPath) {
+      // 跨目录移动（items → archive/YYYY、items → deleted）用 move（复制+删除），
+      // SAF 的 DocumentFile.renameTo 不能跨父目录；目标已由 uniquePath 保证不存在。
+      await scoped.move(folderId, oldPath, folderId, newPath);
+    },
+    async remove(path) {
+      await scoped.removeFile(folderId, path);
+    },
+  };
+}
+
+// ── 数据操作 ────────────────────────────────────────────
 
 /** 净化文件名字段：替换非法字符为空格、折叠空白（桌面端 SanitizeSegment）。 */
 export function sanitizeSegment(value: string): string {
@@ -117,7 +206,11 @@ class FolderStore {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** 当前数据根目录（相对 $APPDATA，如 "calendar"），可被用户指定。 */
+  private mode: 'appData' | 'external' = 'appData';
+  private adapter: StorageAdapter = appDataAdapter;
+  private folderId = '';
+
+  /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：'' = 所选文件夹根）。 */
   private root = DEFAULT_ROOT;
   private itemsDir = `${DEFAULT_ROOT}/items`;
   private archiveDir = `${DEFAULT_ROOT}/archive`;
@@ -129,17 +222,27 @@ class FolderStore {
   /** items/ 目录内容变化后触发（去抖），含应用外部改动。 */
   onItemsChanged: (() => void) | null = null;
 
-  /** 当前数据根目录（相对 $APPDATA）。 */
+  /** 当前存储模式。 */
+  getMode(): 'appData' | 'external' {
+    return this.mode;
+  }
+
+  /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：''）。 */
   getRoot(): string {
     return this.root;
   }
 
-  /**
-   * 初始化 / 切换数据根目录：净化目录名、重建目录、重启监听，
-   * 完成后触发 onChange（App 借此刷新各视图）。
-   */
-  async setRoot(root: string): Promise<void> {
-    const cleaned = sanitizeRootPath(root);
+  /** external 模式下的 SAF 文件夹句柄 id（appData 模式下为空串）。 */
+  getFolderId(): string {
+    return this.folderId;
+  }
+
+  /** 切换为 appData 模式：数据根目录为 $APPDATA 下的任意子目录。 */
+  async setRoot(dataDir: string): Promise<void> {
+    const cleaned = sanitizeRootPath(dataDir);
+    this.mode = 'appData';
+    this.adapter = appDataAdapter;
+    this.folderId = '';
     this.root = cleaned;
     this.itemsDir = `${cleaned}/items`;
     this.archiveDir = `${cleaned}/archive`;
@@ -147,22 +250,40 @@ class FolderStore {
     await this.open();
   }
 
+  /** 切换为 external 模式：数据根目录为用户通过系统选择器选定的外部文件夹。 */
+  async setExternalFolder(folderId: string): Promise<void> {
+    if (!folderId) {
+      throw new Error('文件夹句柄为空。');
+    }
+    this.mode = 'external';
+    this.adapter = scopedStorageAdapter(folderId);
+    this.folderId = folderId;
+    this.root = '';
+    this.itemsDir = 'items';
+    this.archiveDir = 'archive';
+    this.deletedDir = 'deleted';
+    await this.open();
+  }
+
   async open(): Promise<void> {
     this.stopWatching();
-    await mkdir(this.itemsDir, { baseDir: BaseDirectory.AppData, recursive: true });
-    await mkdir(this.deletedDir, { baseDir: BaseDirectory.AppData, recursive: true });
+    await this.adapter.mkdir(this.itemsDir);
+    await this.adapter.mkdir(this.deletedDir);
 
-    // 监听 items/ 目录（notify 后端，300ms 去抖，对应桌面端 FileSystemWatcher）
-    try {
-      this.unwatch = await watch(
-        this.itemsDir,
-        () => this.scheduleReload(),
-        { baseDir: BaseDirectory.AppData, recursive: false, delayMs: 300 },
-      );
-    } catch (err) {
-      // 某些 Android 文件系统上 notify 可能不可用：降级为轮询兜底
-      console.warn('items 目录监听启动失败，降级为轮询刷新：', err);
-      this.unwatch = null;
+    // appData 模式可监听 items/ 目录（notify 后端，300ms 去抖）；
+    // external 模式（SAF）插件不支持 watch，直接轮询兜底。
+    if (this.mode === 'appData') {
+      try {
+        this.unwatch = await watch(
+          this.itemsDir,
+          () => this.scheduleReload(),
+          { baseDir: BaseDirectory.AppData, recursive: false, delayMs: 300 },
+        );
+      } catch (err) {
+        // 某些 Android 文件系统上 notify 可能不可用：降级为轮询兜底
+        console.warn('items 目录监听启动失败，降级为轮询刷新：', err);
+        this.unwatch = null;
+      }
     }
 
     if (!this.unwatch) {
@@ -241,12 +362,9 @@ class FolderStore {
     const source = await this.findItemFile(item);
     if (!source) return null;
 
-    await mkdir(this.deletedDir, { baseDir: BaseDirectory.AppData, recursive: true });
+    await this.adapter.mkdir(this.deletedDir);
     const destination = await this.uniquePath(`${this.deletedDir}/${item.fileName}`);
-    await rename(source, destination, {
-      oldPathBaseDir: BaseDirectory.AppData,
-      newPathBaseDir: BaseDirectory.AppData,
-    });
+    await this.adapter.rename(source, destination);
     this.notifyChanged();
     return destination;
   }
@@ -259,12 +377,9 @@ class FolderStore {
       if (!item || !isExpired(item)) continue;
 
       const directory = await this.getArchiveDirectory(item);
-      await mkdir(directory, { baseDir: BaseDirectory.AppData, recursive: true });
+      await this.adapter.mkdir(directory);
       const destination = await this.uniquePath(`${directory}/${file.name}`);
-      await rename(file.path, destination, {
-        oldPathBaseDir: BaseDirectory.AppData,
-        newPathBaseDir: BaseDirectory.AppData,
-      });
+      await this.adapter.rename(file.path, destination);
       changed = true;
     }
     if (changed) this.notifyChanged();
@@ -292,7 +407,7 @@ class FolderStore {
     return (await this.enumerateItemFiles()).length;
   }
 
-  // ── 内部实现 ──────────────────────────────────────────────
+  // ── 内部实现 ──────────────────────────────────────────
 
   private async writeItemFile(item: ScheduleEvent, directory: string): Promise<string> {
     const startsAt = new Date(item.startsAt);
@@ -313,14 +428,14 @@ class FolderStore {
 
     // 冲突（同一秒 + 同标题 + 同标签）时加后缀，绝不静默覆盖
     const fileName = await this.uniquePath(`${directory}/${baseName}.md`);
-    await mkdir(directory, { baseDir: BaseDirectory.AppData, recursive: true });
-    await writeTextFile(fileName, item.notes ?? '', { baseDir: BaseDirectory.AppData });
+    await this.adapter.mkdir(directory);
+    await this.adapter.writeTextFile(fileName, item.notes ?? '');
     return fileName;
   }
 
   /** 目标路径已存在时追加时间后缀（桌面端 "_HHmmssfff" 思路）。 */
   private async uniquePath(relPath: string): Promise<string> {
-    if (!(await exists(relPath, { baseDir: BaseDirectory.AppData }))) {
+    if (!(await this.adapter.exists(relPath))) {
       return relPath;
     }
     const dot = relPath.lastIndexOf('.');
@@ -338,16 +453,16 @@ class FolderStore {
     return `${this.archiveDir}/${year}`;
   }
 
-  /** 在 items/ 和所有 archive/YYYY/ 中查找文件，返回相对 $APPDATA 的路径。 */
+  /** 在 items/ 和所有 archive/YYYY/ 中查找文件，返回相对各后端根目录的路径。 */
   private async findItemFile(item: ScheduleEvent): Promise<string | null> {
     if (!item.fileName) return null;
     const inItems = `${this.itemsDir}/${item.fileName}`;
-    if (await exists(inItems, { baseDir: BaseDirectory.AppData })) {
+    if (await this.adapter.exists(inItems)) {
       return inItems;
     }
     for (const dir of await this.enumerateArchiveDirectories()) {
       const path = `${dir}/${item.fileName}`;
-      if (await exists(path, { baseDir: BaseDirectory.AppData })) {
+      if (await this.adapter.exists(path)) {
         return path;
       }
     }
@@ -357,7 +472,7 @@ class FolderStore {
   private async deleteItemFileAnywhere(item: ScheduleEvent): Promise<void> {
     const path = await this.findItemFile(item);
     if (!path) return;
-    await remove(path, { baseDir: BaseDirectory.AppData });
+    await this.adapter.remove(path);
   }
 
   /** items/ 下所有 .md 文件。 */
@@ -376,8 +491,8 @@ class FolderStore {
 
   private async enumerateArchiveDirectories(): Promise<string[]> {
     try {
-      const entries = await readDir(this.archiveDir, { baseDir: BaseDirectory.AppData });
-      return entries.filter((e) => e.isDirectory).map((e) => `${this.archiveDir}/${e.name}`);
+      const entries = await this.adapter.readDir(this.archiveDir);
+      return entries.filter((e) => e.isDir).map((e) => `${this.archiveDir}/${e.name}`);
     } catch {
       return [];
     }
@@ -385,7 +500,7 @@ class FolderStore {
 
   private async listMd(dir: string): Promise<{ path: string; name: string }[]> {
     try {
-      const entries = await readDir(dir, { baseDir: BaseDirectory.AppData });
+      const entries = await this.adapter.readDir(dir);
       return entries
         .filter((e) => e.isFile && e.name.endsWith('.md'))
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -417,7 +532,7 @@ class FolderStore {
 
     let notes = '';
     try {
-      notes = await readTextFile(path, { baseDir: BaseDirectory.AppData });
+      notes = await this.adapter.readTextFile(path);
     } catch {
       notes = '';
     }
@@ -461,7 +576,7 @@ class FolderStore {
   private startPolling(): void {
     if (this.pollTimer) return;
     this.pollTimer = setInterval(() => {
-      // 移动端无桌面文件管理器场景，30s 兜底足够
+      // 移动端无桌面文件管理器场景，30s 兜底足够（SAF 外部目录无 watch 时同样依赖此机制）
       this.onItemsChanged?.();
     }, 30_000);
   }

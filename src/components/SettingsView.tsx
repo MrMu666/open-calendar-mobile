@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { appDataDir } from '@tauri-apps/api/path';
+import { getFolderInfo, isScopedStorageError, pickFolder } from 'tauri-plugin-scoped-storage-api';
 import type { Theme, UserSettings } from '../lib/settings';
 import { ACCENT_PRESETS, DEFAULT_SETTINGS } from '../lib/settings';
-import { sanitizeRootPath, store } from '../lib/store';
-import FolderPicker from './FolderPicker';
+import { store } from '../lib/store';
 
 interface Props {
   settings: UserSettings;
@@ -15,9 +15,10 @@ interface Props {
 /** 设置页：外观（亮/暗主题、强调色）+ 数据（存储目录）+ 关于。 */
 export default function SettingsView({ settings, onChange, refreshTick }: Props) {
   const [appDir, setAppDir] = useState('');
+  const [dirError, setDirError] = useState('');
+  const [externalInfo, setExternalInfo] = useState<{ name: string; uri: string } | null>(null);
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [version, setVersion] = useState('');
-  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     appDataDir()
@@ -38,18 +39,51 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     };
   }, [refreshTick]);
 
-  /** 切换数据目录：净化校验 → 重建 store 根目录 → 保存设置。 */
-  const applyDir = async (name: string): Promise<void> => {
+  // external 模式下展示所选文件夹名称与 URI
+  useEffect(() => {
+    if (settings.storageMode !== 'external' || !settings.folderId) {
+      setExternalInfo(null);
+      return;
+    }
+    let cancelled = false;
+    getFolderInfo(settings.folderId)
+      .then((f) => {
+        if (!cancelled) setExternalInfo({ name: f.name ?? '外部目录', uri: f.uri ?? '' });
+      })
+      .catch(() => {
+        if (!cancelled) setExternalInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.storageMode, settings.folderId]);
+
+  /** 打开系统 SAF 目录选择器（从手机存储根开始），选定后切换为外部存储模式。 */
+  const handlePickFolder = async (): Promise<void> => {
+    setDirError('');
     try {
-      const cleaned = sanitizeRootPath(name);
-      await store.setRoot(cleaned);
-      onChange({ dataDir: cleaned });
-      setPickerOpen(false);
+      const folder = await pickFolder();
+      if (!folder) return;
+      await store.setExternalFolder(folder.id);
+      onChange({ storageMode: 'external', folderId: folder.id });
     } catch (err) {
-      // 选择器内已保证合法，此处兜底
-      console.error('切换数据目录失败：', err);
+      if (isScopedStorageError(err) && err.code === 'CANCELLED') return; // 用户取消，静默
+      setDirError(err instanceof Error ? err.message : '选择文件夹失败。');
     }
   };
+
+  /** 恢复默认：应用数据目录 / calendar。 */
+  const handleReset = async (): Promise<void> => {
+    setDirError('');
+    try {
+      await store.setRoot(DEFAULT_SETTINGS.dataDir);
+      onChange({ storageMode: 'appData', dataDir: DEFAULT_SETTINGS.dataDir, folderId: '' });
+    } catch (err) {
+      setDirError(err instanceof Error ? err.message : '恢复默认目录失败。');
+    }
+  };
+
+  const isExternal = settings.storageMode === 'external';
 
   return (
     <div className="view settings-view">
@@ -93,17 +127,21 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
         <div className="settings-title">数据</div>
         <div className="setting-info">
           <span className="setting-label">存储目录</span>
-          <span className="setting-value mono">{settings.dataDir}</span>
+          <span className="setting-value mono">
+            {isExternal
+              ? externalInfo
+                ? `${externalInfo.name}（外部目录）`
+                : '外部目录'
+              : `应用数据 / ${settings.dataDir}`}
+          </span>
         </div>
-        <div className="dir-row">
-          <button type="button" className="btn small primary" onClick={() => setPickerOpen(true)}>
-            选择目录…
-          </button>
-          <button type="button" className="btn small" onClick={() => void applyDir(DEFAULT_SETTINGS.dataDir)}>
-            恢复默认
-          </button>
-        </div>
-        {appDir && (
+        {isExternal && externalInfo && (
+          <div className="setting-info">
+            <span className="setting-label">完整路径</span>
+            <span className="setting-value mono">{externalInfo.uri}/items</span>
+          </div>
+        )}
+        {!isExternal && appDir && (
           <div className="setting-info">
             <span className="setting-label">完整路径</span>
             <span className="setting-value mono">
@@ -111,19 +149,22 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
             </span>
           </div>
         )}
+        <div className="dir-row">
+          <button type="button" className="btn small primary" onClick={() => void handlePickFolder()}>
+            选择目录…
+          </button>
+          <button type="button" className="btn small" onClick={() => void handleReset()}>
+            恢复默认
+          </button>
+        </div>
+        {dirError && <p className="editor-error">{dirError}</p>}
         <p className="settings-note">
-          事项以 Markdown 文件保存在应用数据目录下的指定子目录（items / archive / deleted），
-          结构与桌面版一致。切换目录后仅显示新目录中的事项，原目录数据保留在设备上；
-          应用设置保存在独立的 settings.json，不随目录迁移。
+          「选择目录…」会打开系统文件夹选择器，可浏览手机根目录及任意位置，选定后
+          需要授予该文件夹的访问权限（仅限所选文件夹，可随时撤销）。事项以 Markdown
+          文件保存在所选目录下（items / archive / deleted），结构与桌面版一致；
+          切换目录后仅显示新目录中的事项，原目录数据保留在设备上。应用设置保存在
+          独立的 settings.json，不随目录迁移。
         </p>
-
-        {pickerOpen && (
-          <FolderPicker
-            initialPath={settings.dataDir}
-            onPick={(p) => void applyDir(p)}
-            onClose={() => setPickerOpen(false)}
-          />
-        )}
         <div className="setting-info">
           <span className="setting-label">未归档事项</span>
           <span className="setting-value">{itemCount === null ? '…' : itemCount} 条</span>

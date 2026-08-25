@@ -8,19 +8,28 @@ import { sanitizeRootPath } from './store';
  */
 export type Theme = 'light' | 'dark';
 
+/** 存储模式：应用数据目录（默认）或用户通过系统选择器选定的外部目录（SAF）。 */
+export type StorageMode = 'appData' | 'external';
+
 export interface UserSettings {
   /** 亮色 / 暗色主题（默认亮色）。 */
   theme: Theme;
   /** 强调色：日历选中日 / 新增按钮共用（桌面端默认 #4CAF50）。 */
   accentColor: string;
-  /** 事项数据根目录：应用数据目录下的子目录（如 "calendar"），可随意指定。 */
+  /** 存储模式。 */
+  storageMode: StorageMode;
+  /** appData 模式：应用数据目录下的子目录名（如 "calendar"）。 */
   dataDir: string;
+  /** external 模式：SAF 文件夹句柄 id（由 scoped-storage 插件持久化）。 */
+  folderId: string;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
   theme: 'light',
   accentColor: '#4CAF50',
+  storageMode: 'appData',
   dataDir: 'calendar',
+  folderId: '',
 };
 
 /** 强调色预设（设置页用）。 */

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { listFolders } from 'tauri-plugin-scoped-storage-api';
 import type { ScheduleEvent } from './types';
 import { store } from './lib/store';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from './lib/settings';
@@ -33,9 +34,21 @@ export default function App() {
     store.onItemsChanged = refresh;
     store.onChange = refresh;
     // 先读设置（含数据目录），再按设置初始化存储
-    void loadSettings().then((s) => {
+    void loadSettings().then(async (s) => {
       setSettings(s);
-      return store.setRoot(s.dataDir).catch(() => store.setRoot(DEFAULT_SETTINGS.dataDir));
+      if (s.storageMode === 'external' && s.folderId) {
+        // 校验 SAF 句柄是否仍有效（用户可能已撤销授权 / 卸载重装插件状态丢失）
+        const folders = await listFolders().catch(() => []);
+        if (folders.some((f) => f.id === s.folderId)) {
+          await store.setExternalFolder(s.folderId).catch(() => store.setRoot(DEFAULT_SETTINGS.dataDir));
+          return;
+        }
+        // 句柄失效 → 回退应用数据目录并修正设置
+        const fallback: UserSettings = { ...s, storageMode: 'appData', folderId: '' };
+        setSettings(fallback);
+        void saveSettings(fallback);
+      }
+      await store.setRoot(s.dataDir).catch(() => store.setRoot(DEFAULT_SETTINGS.dataDir));
     });
     return () => {
       store.onItemsChanged = null;
