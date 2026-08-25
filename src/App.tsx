@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { ScheduleEvent } from './types';
 import { store } from './lib/store';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from './lib/settings';
-import { blendOverBlack } from './lib/format';
 import CalendarView from './components/CalendarView';
 import TasksView from './components/TasksView';
 import SettingsView from './components/SettingsView';
@@ -53,7 +52,8 @@ export default function App() {
     setEditor({ existing });
   }, []);
 
-  const panelBg = blendOverBlack(settings.backgroundColor, settings.backgroundOpacity);
+  const theme = settings.theme;
+  const panelBg = theme === 'dark' ? 'rgb(13, 17, 23)' : 'rgb(245, 246, 248)';
 
   const style = {
     '--accent': settings.accentColor,
@@ -62,7 +62,7 @@ export default function App() {
   } as CSSProperties;
 
   return (
-    <div className="app" style={style}>
+    <div className={`app theme-${theme}`} style={style}>
       <main className="app-main">
         {tab === 'calendar' && (
           <CalendarView

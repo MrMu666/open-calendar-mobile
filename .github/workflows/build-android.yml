@@ -65,9 +65,12 @@ jobs:
         run: npm run tauri android init
 
       - name: Generate app icons into Android project
-        # tauri icon 在 gen/android 已存在时会把图标直接写入
-        # gen/android/app/src/main/res/（init 模板自带默认图标，必须覆盖）
-        run: npm run tauri icon
+        # 先预处理 Android 前景图（缩放居中 + 透明边距，避免图标过大），
+        # 再用 manifest 生成；tauri icon 在 gen/android 已存在时会把图标
+        # 直接写入 gen/android/app/src/main/res/（init 模板自带默认图标，必须覆盖）
+        run: |
+          node scripts/prepare-android-icon.mjs
+          npm run tauri icon app-icon.json
 
       - name: Setup Android signing
         # 从 GitHub Secrets 恢复 keystore 与密码，写入官方约定的 keystore.properties

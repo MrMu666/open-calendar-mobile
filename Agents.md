@@ -9,7 +9,7 @@
 - 日历月视图：6×7 网格、农历显示、事项圆点、选中日日程列表
 - 事项列表：未到期事项、优先级/标签、展开详情、设为长期/已完成、删除
 - 编辑器：底部弹层，标题/开始/截止时间、标签、优先级、Markdown 内容
-- 设置：背景色/透明度、强调色（桌面端的"存储文件夹/开机自启"在移动端无对应项）
+- 设置：亮色/暗色主题切换、强调色（桌面端的"存储文件夹/开机自启/背景色/透明度"在移动端无对应项）
 
 ## 技术栈
 
@@ -28,7 +28,10 @@ scripts/
   inject-android-signing.py  # CI 签名注入（init 后改写 build.gradle.kts）
 .github/workflows/
   build-android.yml          # 推送触发：bump 版本 → init → 签名 → 构建分架构 APK → 发 Release
-app-icon.png                 # 图标源图（桌面端 Assets/app-256.png 的副本，tauri icon 用）
+app-icon.png                 # 图标源图（桌面端 Assets/app-256.png 的副本）
+app-icon.json                # tauri icon manifest：android_fg/android_bg/缩放/背景色
+app-icon-fg.png / app-icon-bg.png  # 预处理生成的 Android 前景/背景层（勿手改）
+scripts/prepare-android-icon.mjs   # 生成上述前景/背景层（内容缩放居中，避免图标过大）
 sign/                        # Android 签名 keystore（敏感，.gitignore 排除，见 README.md）
 src/
   main.tsx / App.tsx         # 应用外壳：三栏切换 + 编辑器弹层状态
@@ -104,7 +107,14 @@ src-tauri/
   `items/` 拷贝迁移。
 - 无开机自启、无系统托盘、无玻璃壁纸效果（桌面端核心特色，移动端不适用）。
 - 桌面端用 `FileSystemWatcher`；移动端用 fs 插件 watch + 轮询兜底。
-- 设置只保留外观部分（背景色/透明度/强调色），存 `calendar/settings.json`（与数据同目录）。
+- 设置只保留外观部分（亮/暗主题 + 强调色），存 `calendar/settings.json`（与数据同目录）。
+  主题在 `App.tsx` 切换 `theme-dark`/`theme-light` class，两套配色定义在 `App.css` 变量区。
+- **Android 状态栏**：Tauri 默认 `enableEdgeToEdge()` 沉浸式，`.app` 已加
+  `padding-top: env(safe-area-inset-top)` 避让顶部状态栏（底部 TabBar/弹层同样处理）。
+- **Android 图标**：桌面端图标内容满幅（98%），直接做自适应图标前景会视觉过大。
+  CI 构建前跑 `scripts/prepare-android-icon.mjs` 生成缩放居中（66% 安全区）的
+  前景图 + 同色背景层，再 `tauri icon app-icon.json` 生成全套图标（含写入
+  `gen/android/.../res/`）。改图标时同步更新 `app-icon.json` 与脚本参数。
 
 ## 常用命令
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { appDataDir } from '@tauri-apps/api/path';
-import type { UserSettings } from '../lib/settings';
-import { ACCENT_PRESETS, COLOR_PRESETS } from '../lib/settings';
+import type { Theme, UserSettings } from '../lib/settings';
+import { ACCENT_PRESETS } from '../lib/settings';
 import { store } from '../lib/store';
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
   refreshTick: number;
 }
 
-/** 设置页：外观（背景色/透明度/强调色）+ 数据说明 + 关于。 */
+/** 设置页：外观（亮/暗主题、强调色）+ 数据说明 + 关于。 */
 export default function SettingsView({ settings, onChange, refreshTick }: Props) {
   const [dataDir, setDataDir] = useState('');
   const [itemCount, setItemCount] = useState<number | null>(null);
@@ -42,30 +42,19 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
         <div className="settings-title">外观</div>
 
         <div className="setting-row">
-          <span className="setting-label">背景色</span>
-          <div className="swatch-row">
-            {COLOR_PRESETS.map((c) => (
+          <span className="setting-label">主题</span>
+          <div className="theme-toggle" role="group" aria-label="主题">
+            {(['dark', 'light'] as Theme[]).map((t) => (
               <button
-                key={c}
+                key={t}
                 type="button"
-                className={`swatch${settings.backgroundColor === c ? ' active' : ''}`}
-                style={{ background: c }}
-                aria-label={`背景色 ${c}`}
-                onClick={() => onChange({ backgroundColor: c })}
-              />
+                className={`theme-option${settings.theme === t ? ' active' : ''}`}
+                onClick={() => onChange({ theme: t })}
+              >
+                {t === 'dark' ? '暗色' : '亮色'}
+              </button>
             ))}
           </div>
-        </div>
-
-        <div className="setting-row">
-          <span className="setting-label">透明度 {Math.round(settings.backgroundOpacity * 100)}%</span>
-          <input
-            type="range"
-            min={10}
-            max={100}
-            value={Math.round(settings.backgroundOpacity * 100)}
-            onChange={(e) => onChange({ backgroundOpacity: Number(e.target.value) / 100 })}
-          />
         </div>
 
         <div className="setting-row">

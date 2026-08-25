@@ -12,7 +12,7 @@ Tauri 2 + React 19 + TypeScript + Vite。全中文 UI，底部三栏：**日历 
 - **事项**：未到期事项列表、优先级（P1 紧急/P2 优先/P3 一般/P4 长期）、标签、展开详情、
   设为长期 / 已完成 / 删除
 - **编辑器**：底部弹层，标题 / 开始 / 截止时间、标签、优先级、Markdown 内容
-- **设置**：背景色 / 透明度、强调色（与桌面端默认值一致）
+- **设置**：亮色 / 暗色主题切换、强调色
 
 ## 开发
 
@@ -53,8 +53,8 @@ src/                前端（React 19 + TS）
   lib/store.ts      FolderItemStore 移植（数据存储核心）
   lib/lunar.ts      农历封装
   components/       三栏视图 + 事项编辑器
-src-tauri/          Tauri 2 壳（fs 插件 + 权限）
-scripts/            CI 辅助脚本（版本递增、签名注入）
+scripts/            CI 辅助脚本（版本递增、签名注入、图标预处理）
+app-icon.json       tauri icon manifest（Android 图标缩放配置）
 .github/workflows/  Android 构建 workflow
 sign/               Android 签名（敏感，不入库）
 ```
