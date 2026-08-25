@@ -31,8 +31,8 @@ Android 构建需要 JDK + Android SDK + Rust（本机未装，由 GitHub Action
 
 1. 递增小版本号（patch +1）并提交回仓库（`scripts/bump-version.mjs`）
 2. 初始化 Android 工程 → 注入签名配置（`scripts/inject-android-signing.py`）
-3. 构建带签名的 APK（`--target aarch64`）
-4. 上传为 Actions Artifact，可直接下载安装
+3. 构建带签名的 APK（`--split-per-abi`，按架构拆分）
+4. 创建 GitHub Release 并上传各架构 APK，**直接从 Release 页下载 .apk 文件**（不用 Artifact，避免 zip 压缩包）
 
 ### 一次性配置签名（可选但推荐）
 

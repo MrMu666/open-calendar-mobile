@@ -27,7 +27,8 @@ scripts/
   bump-version.mjs           # CI 版本递增（同步 package.json / tauri.conf.json）
   inject-android-signing.py  # CI 签名注入（init 后改写 build.gradle.kts）
 .github/workflows/
-  build-android.yml          # 推送触发：bump 版本 → init → 签名 → 构建 APK → 上传
+  build-android.yml          # 推送触发：bump 版本 → init → 签名 → 构建分架构 APK → 发 Release
+app-icon.png                 # 图标源图（桌面端 Assets/app-256.png 的副本，tauri icon 用）
 sign/                        # Android 签名 keystore（敏感，.gitignore 排除，见 README.md）
 src/
   main.tsx / App.tsx         # 应用外壳：三栏切换 + 编辑器弹层状态
@@ -66,6 +67,13 @@ src-tauri/
   提交回仓库（commit message 带 `[skip ci]`）。versionCode 由 Tauri 按
   `major*1000000 + minor*1000 + patch` 推导，随版本递增。
 - **注意**：CI 的 bump 提交会 push 到仓库，本地需 pull 后再改代码，避免冲突。
+
+### CI 分发：按架构拆分 APK + GitHub Release
+- `tauri android build -- --apk --split-per-abi` 为 aarch64/armv7/i686/x86_64 各产出一个
+  独立 APK（输出在 `gen/android/app/build/outputs/apk/<abi>/release/`）。
+- **不用 `actions/upload-artifact`**：Artifact 下载永远是 zip 压缩包；改由
+  `softprops/action-gh-release` 把 APK 作为 **Release 资产**上传，直接从 Release 页
+  下载原始 `.apk` 文件。每次构建打 `v<patch 版本>` tag 并创建 Release。
 
 ### Android 签名（CI 注入）
 - 官方约定：`src-tauri/gen/android/keystore.properties` + `app/build.gradle.kts` 的
