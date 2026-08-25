@@ -1,0 +1,94 @@
+name: Build Android APK
+
+# 推送（main / master）时自动构建安卓版；也可在 Actions 页手动触发。
+# 每次触发都会先把小版本号（patch）+1 并提交回仓库，再构建带签名的 APK。
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          NEW_VERSION="$(node scripts/bump-version.mjs)"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "已递增版本号 -> $NEW_VERSION"
+
+      - name: Commit version bump
+        # GITHUB_TOKEN 的 push 不会再次触发 workflow，配合 [skip ci] 双保险
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.new_version }} [skip ci]"
+          git push
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;27.0.12077973" >/dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Init Android project
+        run: npm run tauri android init
+
+      - name: Setup Android signing
+        # 从 GitHub Secrets 恢复 keystore 与密码，写入官方约定的 keystore.properties
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::warning::未配置 ANDROID_KEYSTORE_* Secrets，将构建未签名 APK"
+            exit 0
+          fi
+          cd src-tauri/gen/android
+          echo "keyAlias=${KEY_ALIAS:-upload}" > keystore.properties
+          echo "password=$KEYSTORE_PASSWORD" >> keystore.properties
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore.p12"
+          echo "storeFile=$RUNNER_TEMP/keystore.p12" >> keystore.properties
+          cd "$GITHUB_WORKSPACE"
+          python3 scripts/inject-android-signing.py
+          echo "签名配置完成"
+
+      - name: Build Android APK
+        run: npm run tauri android build -- --apk --target aarch64
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-calendar-mobile-v${{ steps.bump.outputs.new_version }}
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
