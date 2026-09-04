@@ -113,12 +113,18 @@ jobs:
           fi
 
       - name: Collect APKs with ABI names
-        # 输出目录结构：apk/<abi>/release/*.apk（abi = aarch64/armv7/i686/x86_64）
+        # 输出目录结构：apk/<raw>/release/*.apk（raw 为 Rust 目标短名：arm/arm64/x86/x86_64），
+        # 重命名为标准 Android ABI 名（arm→armeabi-v7a、arm64→arm64-v8a），与 Release 描述一致
         run: |
           mkdir -p apks
           for f in src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk; do
             [ -f "$f" ] || continue
-            abi=$(basename "$(dirname "$(dirname "$f")")")
+            raw=$(basename "$(dirname "$(dirname "$f")")")
+            case "$raw" in
+              arm) abi="armeabi-v7a" ;;
+              arm64) abi="arm64-v8a" ;;
+              *) abi="$raw" ;;
+            esac
             cp "$f" "apks/open-calendar-mobile-${abi}-v${{ steps.bump.outputs.new_version }}.apk"
           done
           ls -la apks/

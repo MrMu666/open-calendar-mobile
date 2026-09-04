@@ -97,10 +97,11 @@ src-tauri/
 
 ### CI 分发：按架构拆分 APK + GitHub Release
 - `tauri android build -- --apk --split-per-abi` 为各 ABI 各产出一个独立 APK
-  （输出在 `gen/android/app/build/outputs/apk/<abi>/release/`，abi 目录名如
-  `arm64-v8a`/`armeabi-v7a`/`x86_64`/`x86`）。Collect 步骤用
-  `apk/*/release/*.apk` + 两级 `dirname` 的 `basename` 提取 abi 名（只取一级会
-  拿到 `release` 导致同名覆盖、release 只剩一个 APK——已踩坑）。
+  （输出在 `gen/android/app/build/outputs/apk/<短名>/release/`，短名为 Rust 目标风格
+  `arm`/`arm64`/`x86`/`x86_64`）。Collect 步骤用
+  `apk/*/release/*.apk` + 两级 `dirname` 的 `basename` 提取短名（只取一级会
+  拿到 `release` 导致同名覆盖、release 只剩一个 APK——已踩坑），再映射为标准
+  Android ABI 名（`arm→armeabi-v7a`、`arm64→arm64-v8a`）写入文件名，与 Release 描述一致。
 - **图标必须 init 后再跑一次 `tauri icon`**：`tauri icon` 在
   `gen/android/app/src/main/res/` 已存在时会把图标直接写进 Android 工程；
   否则只写 `src-tauri/icons/android/`，而 `tauri android init` 模板自带默认图标，
