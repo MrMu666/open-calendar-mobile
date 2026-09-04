@@ -16,7 +16,8 @@ interface Props {
 interface DayCell {
   date: Date;
   isInMonth: boolean;
-  hasEvents: boolean;
+  /** none=无事项；active=存在未到期事项（红点）；expired=有事项但均已到期（绿点） */
+  dayStatus: 'none' | 'active' | 'expired';
   isToday: boolean;
   isSelected: boolean;
   lunar: string;
@@ -60,10 +61,16 @@ export default function CalendarView({ refreshTick, accentColor, onEdit, onNew }
   const cells = useMemo<DayCell[]>(() => {
     const first = startOfMonth(displayMonth);
     const gridStart = new Date(first.getFullYear(), first.getMonth(), 1 - first.getDay());
-    const eventDays = new Set(monthEvents.map((e) => {
+    // 按开始日聚合：任一未到期（endsAt 为空或未到 now，与事项列表过滤口径一致）即 active
+    const now = Date.now();
+    const statusByDay = new Map<string, 'active' | 'expired'>();
+    for (const e of monthEvents) {
       const d = new Date(e.startsAt);
-      return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    }));
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const active = e.endsAt == null || new Date(e.endsAt).getTime() >= now;
+      const prev = statusByDay.get(key);
+      statusByDay.set(key, active || prev === 'active' ? 'active' : 'expired');
+    }
     const today = startOfDay(new Date());
     const out: DayCell[] = [];
     for (let i = 0; i < 42; i++) {
@@ -72,7 +79,7 @@ export default function CalendarView({ refreshTick, accentColor, onEdit, onNew }
       out.push({
         date: d,
         isInMonth: d.getMonth() === first.getMonth(),
-        hasEvents: eventDays.has(key),
+        dayStatus: statusByDay.get(key) ?? 'none',
         isToday: d.getTime() === today.getTime(),
         isSelected: d.getTime() === selected.getTime(),
         lunar: lunarDayName(d),
@@ -155,7 +162,14 @@ export default function CalendarView({ refreshTick, accentColor, onEdit, onNew }
           >
             <span className="day-num">{cell.date.getDate()}</span>
             <span className="day-lunar">{cell.lunar}</span>
-            <span className="day-dot" style={{ opacity: cell.hasEvents ? 1 : 0 }} />
+            {/* 未到期=红（同 .item-end）、均已到期=绿（同 .item-start），无事项隐藏 */}
+            <span
+              className="day-dot"
+              style={{
+                opacity: cell.dayStatus === 'none' ? 0 : 1,
+                background: cell.dayStatus === 'active' ? 'var(--red)' : 'var(--green)',
+              }}
+            />
           </button>
         ))}
       </div>
