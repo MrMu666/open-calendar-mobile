@@ -6,12 +6,16 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "all-files-access:default",
     "fs:default",
     "fs:allow-app-read-recursive",
     "fs:allow-app-write-recursive",
     "fs:allow-app-meta-recursive",
     "fs:allow-watch",
     "fs:allow-unwatch",
-    "scoped-storage:default"
+    {
+      "identifier": "fs:scope",
+      "allow": ["/storage/emulated/0/**/*"]
+    }
   ]
 }

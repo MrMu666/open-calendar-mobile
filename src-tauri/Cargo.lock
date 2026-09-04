@@ -2469,9 +2469,9 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-all-files-access",
  "tauri-plugin-fs",
  "tauri-plugin-opener",
- "tauri-plugin-scoped-storage",
 ]
 
 [[package]]
@@ -3612,6 +3612,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-all-files-access"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
 name = "tauri-plugin-fs"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3657,18 +3666,6 @@ dependencies = [
  "url",
  "windows",
  "zbus",
-]
-
-[[package]]
-name = "tauri-plugin-scoped-storage"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15c76a07946fb84866dc289fef15d69a590a2938cc6de65cb416ce563c97a797"
-dependencies = [
- "serde",
- "tauri",
- "tauri-plugin",
- "thiserror 2.0.20",
 ]
 
 [[package]]

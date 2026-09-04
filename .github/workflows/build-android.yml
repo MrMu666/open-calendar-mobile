@@ -64,6 +64,12 @@ jobs:
       - name: Init Android project
         run: npm run tauri android init
 
+      - name: Assert MANAGE_EXTERNAL_STORAGE merged
+        # 本地插件自带 manifest 声明，init 时应自动合并进应用 manifest；失败即停
+        run: |
+          MANIFEST=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          grep -q "MANAGE_EXTERNAL_STORAGE" "$MANIFEST" && echo "权限已合并" || (echo "::error::MANAGE_EXTERNAL_STORAGE 未合并进 AndroidManifest" && exit 1)
+
       - name: Generate app icons into Android project
         # 先预处理 Android 前景图（缩放居中 + 透明边距，避免图标过大），
         # 再用 manifest 生成；tauri icon 在 gen/android 已存在时会把图标
