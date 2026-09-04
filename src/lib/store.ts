@@ -10,7 +10,6 @@ import {
   watch,
   writeTextFile as fsWriteTextFile,
 } from '@tauri-apps/plugin-fs';
-import * as scoped from 'tauri-plugin-scoped-storage-api';
 import type { ScheduleEvent } from '../types';
 import { formatFileTime } from './format';
 
@@ -24,10 +23,10 @@ import { formatFileTime } from './format';
  *
  * 两种存储后端（StorageAdapter）：
  *   - appData：应用数据目录（$APPDATA）下的任意子目录（默认 calendar），
- *     通过 @tauri-apps/plugin-fs 读写，可监听文件变化（watch + 轮询兜底）。
- *   - external：用户通过系统 SAF 目录选择器选定的外部目录（如手机根目录/Download），
- *     通过 tauri-plugin-scoped-storage 读写（内部用 content:// 树 URI +
- *     takePersistableUriPermission，权限跨重启持久），不支持 watch，仅轮询刷新。
+ *     通过 @tauri-apps/plugin-fs 读写（baseDir = AppData），可监听文件变化。
+ *   - external：用户指定的外部绝对路径（如 /storage/emulated/0/Download），
+ *     同样走 @tauri-apps/plugin-fs 直接读写（无 baseDir，需 Android 所有文件
+ *     访问权限 + capabilities 的 fs:scope 放行），监听与 appData 同级生效。
  *
  * 目录结构与文件格式两种后端完全一致，数据可直接互相拷贝迁移。
  */
@@ -55,6 +54,23 @@ export function sanitizeRootPath(input: string): string {
   return cleaned;
 }
 
+/** 校验用户输入的外部绝对路径：统一斜杠、去尾斜杠；必须以 / 开头且不含 ..。 */
+export function sanitizeExternalPath(input: string): string {
+  const cleaned = input.trim().replace(/\\/g, '/').replace(/\/+$/g, '');
+  if (!cleaned.startsWith('/')) {
+    throw new Error('外部目录必须是绝对路径（如 /storage/emulated/0/Download）。');
+  }
+  for (const seg of cleaned.split('/')) {
+    if (seg === '..') {
+      throw new Error('路径中不能包含 ..。');
+    }
+  }
+  if (!cleaned) {
+    throw new Error('目录不能为空。');
+  }
+  return cleaned;
+}
+
 /** 长期事项哨兵年份（与桌面端 MarkLongTerm 一致）。 */
 export const LONG_TERM_SENTINEL = new Date(2099, 0, 1, 12, 0, 0);
 
@@ -64,9 +80,9 @@ export interface DirEntry {
   name: string;
   isFile: boolean;
   isDir: boolean;
-  /** 文件字节数（SAF readDir 自带；appData 端无，走 stat）。 */
+  /** 文件字节数（部分后端 readDir 自带；缺失时走 stat）。 */
   size?: number | null;
-  /** 最后修改毫秒时间戳（SAF readDir 自带；appData 端无，走 stat）。 */
+  /** 最后修改毫秒时间戳（部分后端 readDir 自带；缺失时走 stat）。 */
   mtimeMs?: number | null;
 }
 
@@ -124,48 +140,43 @@ const appDataAdapter: StorageAdapter = {
   },
 };
 
-/** external 后端：tauri-plugin-scoped-storage（SAF 目录句柄）。 */
-function scopedStorageAdapter(folderId: string): StorageAdapter {
+/** external 后端：外部绝对路径直连（@tauri-apps/plugin-fs，无 baseDir）。 */
+function directFsAdapter(baseAbs: string): StorageAdapter {
+  const abs = (p: string) => `${baseAbs}/${p}`;
   return {
     async mkdir(path) {
-      await scoped.mkdir(folderId, path, true);
+      await fsMkdir(abs(path), { recursive: true });
     },
     async readDir(path) {
-      // SAF readDir 条目自带 size/lastModified（Unix 秒），省掉逐文件 stat
-      return (await scoped.readDir(folderId, path || undefined)).map((e) => ({
+      return (await fsReadDir(abs(path))).map((e) => ({
         name: e.name,
-        isFile: e.isFile,
-        isDir: e.isDir,
-        size: e.size ?? null,
-        mtimeMs: e.lastModified != null ? e.lastModified * 1000 : null,
+        isFile: !!e.isFile,
+        isDir: !!e.isDirectory,
       }));
     },
     async readTextFile(path) {
-      return scoped.readTextFile(folderId, path);
+      return fsReadTextFile(abs(path));
     },
     async writeTextFile(path, contents) {
-      // recursive: true —— SAF 写入需自动创建中间目录
-      await scoped.writeTextFile(folderId, path, contents, { recursive: true });
+      await fsWriteTextFile(abs(path), contents);
     },
     async exists(path) {
-      return scoped.exists(folderId, path);
+      return fsExists(abs(path));
     },
     async stat(path) {
       try {
-        const info = await scoped.stat(folderId, path);
-        if (info.lastModified == null || info.size == null) return null;
-        return { mtime: info.lastModified * 1000, size: info.size };
+        const info = await fsStat(abs(path));
+        if (info.mtime == null) return null;
+        return { mtime: info.mtime.getTime(), size: info.size };
       } catch {
         return null;
       }
     },
     async rename(oldPath, newPath) {
-      // 跨目录移动（items → archive/YYYY、items → deleted）用 move（复制+删除），
-      // SAF 的 DocumentFile.renameTo 不能跨父目录；目标已由 uniquePath 保证不存在。
-      await scoped.move(folderId, oldPath, folderId, newPath);
+      await fsRename(abs(oldPath), abs(newPath));
     },
     async remove(path) {
-      await scoped.removeFile(folderId, path);
+      await fsRemove(abs(path));
     },
   };
 }
@@ -261,7 +272,6 @@ class FolderStore {
 
   private mode: 'appData' | 'external' = 'appData';
   private adapter: StorageAdapter = appDataAdapter;
-  private folderId = '';
 
   /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：'' = 所选文件夹根）。 */
   private root = DEFAULT_ROOT;
@@ -292,20 +302,15 @@ class FolderStore {
 
   /**
    * 当前后台监视方式：watch = 文件监听实时生效；
-   * poll = 轮询兜底（SAF 外部目录不支持监听，或监听启动失败）。
+   * poll = 轮询兜底（监听启动失败，如外部路径不可用时）。
    */
   getWatchStatus(): 'watch' | 'poll' {
     return this.unwatch ? 'watch' : 'poll';
   }
 
-  /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：''）。 */
+  /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：外部绝对路径）。 */
   getRoot(): string {
     return this.root;
-  }
-
-  /** external 模式下的 SAF 文件夹句柄 id（appData 模式下为空串）。 */
-  getFolderId(): string {
-    return this.folderId;
   }
 
   /** 切换为 appData 模式：数据根目录为 $APPDATA 下的任意子目录。 */
@@ -313,7 +318,6 @@ class FolderStore {
     const cleaned = sanitizeRootPath(dataDir);
     this.mode = 'appData';
     this.adapter = appDataAdapter;
-    this.folderId = '';
     this.root = cleaned;
     this.itemsDir = `${cleaned}/items`;
     this.archiveDir = `${cleaned}/archive`;
@@ -321,15 +325,12 @@ class FolderStore {
     await this.open();
   }
 
-  /** 切换为 external 模式：数据根目录为用户通过系统选择器选定的外部文件夹。 */
-  async setExternalFolder(folderId: string): Promise<void> {
-    if (!folderId) {
-      throw new Error('文件夹句柄为空。');
-    }
+  /** 切换为 external 模式：数据根目录为外部绝对路径（需所有文件访问权限）。 */
+  async setExternalPath(absPath: string): Promise<void> {
+    const base = sanitizeExternalPath(absPath);
     this.mode = 'external';
-    this.adapter = scopedStorageAdapter(folderId);
-    this.folderId = folderId;
-    this.root = '';
+    this.adapter = directFsAdapter(base);
+    this.root = base;
     this.itemsDir = 'items';
     this.archiveDir = 'archive';
     this.deletedDir = 'deleted';
@@ -345,20 +346,18 @@ class FolderStore {
     await this.adapter.mkdir(this.itemsDir);
     await this.adapter.mkdir(this.deletedDir);
 
-    // 独立后台监视：appData 模式用 notify watch（300ms 去抖）；
-    // external 模式（SAF）插件不支持 watch，直接轮询兜底。
-    if (this.mode === 'appData') {
-      try {
-        this.unwatch = await watch(
-          this.itemsDir,
-          () => this.scheduleReload(),
-          { baseDir: BaseDirectory.AppData, recursive: false, delayMs: 300 },
-        );
-      } catch (err) {
-        // 某些 Android 文件系统上 notify 可能不可用：降级为轮询兜底
-        console.warn('items 目录监听启动失败，降级为轮询刷新：', err);
-        this.unwatch = null;
-      }
+    // 独立后台监视：两种后端都走 fs 直接路径，notify watch 同级生效；
+    // 监听失败时降级为轮询兜底。
+    try {
+      this.unwatch = await watch(this.itemsDir, () => this.scheduleReload(), {
+        ...(this.mode === 'appData' ? { baseDir: BaseDirectory.AppData } : {}),
+        recursive: false,
+        delayMs: 300,
+      });
+    } catch (err) {
+      // 某些 Android 文件系统上 notify 可能不可用：降级为轮询兜底
+      console.warn('items 目录监听启动失败，降级为轮询刷新：', err);
+      this.unwatch = null;
     }
 
     if (!this.unwatch) {
@@ -587,7 +586,7 @@ class FolderStore {
 
   /** 缓存 key 按存储位置隔离：切换目录互不干扰。 */
   private persistedKey(): string {
-    return `ocal.filecache.v1|${this.mode}|${this.mode === 'external' ? this.folderId : this.root}`;
+    return `ocal.filecache.v1|${this.mode}|${this.root}`;
   }
 
   private readPersisted(): Record<string, PersistedFile> {
@@ -715,7 +714,7 @@ class FolderStore {
     for (let i = 0; i < all.length; i += LIMIT) {
       await Promise.all(
         all.slice(i, i + LIMIT).map(async (f) => {
-          // 元数据优先用列表自带的（SAF 免一次 IPC），缺失再逐文件 stat
+          // 元数据优先用列表自带的，缺失再逐文件 stat（免一次 IPC）
           let meta: { mtime: number; size: number } | null =
             f.size != null && f.mtimeMs != null ? { size: f.size, mtime: f.mtimeMs } : null;
           if (!meta) {
@@ -804,7 +803,7 @@ class FolderStore {
   private startPolling(): void {
     if (this.pollTimer) return;
     this.pollTimer = setInterval(() => {
-      // 移动端无桌面文件管理器场景，30s 兜底足够（SAF 外部目录无 watch 时同样依赖此机制）
+      // 监听不可用时的 30s 轮询兜底
       void this.pollCheck();
     }, 30_000);
   }

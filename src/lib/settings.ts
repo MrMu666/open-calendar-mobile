@@ -8,7 +8,7 @@ import { sanitizeRootPath } from './store';
  */
 export type Theme = 'light' | 'dark';
 
-/** 存储模式：应用数据目录（默认）或用户通过系统选择器选定的外部目录（SAF）。 */
+/** 存储模式：应用数据目录（默认）或外部绝对路径（需所有文件访问权限）。 */
 export type StorageMode = 'appData' | 'external';
 
 export interface UserSettings {
@@ -20,8 +20,8 @@ export interface UserSettings {
   storageMode: StorageMode;
   /** appData 模式：应用数据目录下的子目录名（如 "calendar"）。 */
   dataDir: string;
-  /** external 模式：SAF 文件夹句柄 id（由 scoped-storage 插件持久化）。 */
-  folderId: string;
+  /** external 模式：外部绝对路径（如 "/storage/emulated/0/Download"）。 */
+  externalPath: string;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   accentColor: '#4CAF50',
   storageMode: 'appData',
   dataDir: 'calendar',
-  folderId: '',
+  externalPath: '',
 };
 
 /** 强调色预设（设置页用）。 */
