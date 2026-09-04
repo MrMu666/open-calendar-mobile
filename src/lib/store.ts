@@ -189,6 +189,17 @@ function isExpired(item: ScheduleEvent): boolean {
   return item.endsAt != null && new Date(item.endsAt).getTime() < Date.now();
 }
 
+/** 缓存指纹：文件名 + 时间 + 优先级 + 标题 + 标签 + 正文，用于判断磁盘数据是否真变了。 */
+function fingerprintEntries(entries: { item: ScheduleEvent; archived: boolean }[]): string {
+  return entries
+    .map(
+      (e) =>
+        `${e.archived ? 1 : 0}|${e.item.fileName ?? ''}|${e.item.startsAt}|${e.item.endsAt ?? ''}|${e.item.priority}|${e.item.title}|${e.item.tags}|${e.item.notes ?? ''}`,
+    )
+    .sort()
+    .join('\n');
+}
+
 /** 排序：开始时间 → 标题（桌面端 GetUpcoming）。 */
 function byStart(a: ScheduleEvent, b: ScheduleEvent): number {
   const byStart = new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
@@ -216,6 +227,14 @@ class FolderStore {
   private archiveDir = `${DEFAULT_ROOT}/archive`;
   private deletedDir = `${DEFAULT_ROOT}/deleted`;
 
+  // ── 内存缓存（跨视图共享） ──────────────────────────────
+  // 独立后台监视（open 内启动的 watch/轮询）拥有缓存：启动时全量预取一次，
+  // 之后仅在监视到文件变动（watch 事件/轮询指纹变化/应用内写）时整体重读；
+  // 各查询（getUpcoming/getItems/count）只读内存，不再扫盘。
+  private cache: { item: ScheduleEvent; archived: boolean }[] | null = null;
+  private cacheFingerprint = '';
+  private loadGen = 0;
+
   /** 存储目录打开/切换后触发（初始化后立即触发一次）。 */
   onChange: (() => void) | null = null;
 
@@ -225,6 +244,14 @@ class FolderStore {
   /** 当前存储模式。 */
   getMode(): 'appData' | 'external' {
     return this.mode;
+  }
+
+  /**
+   * 当前后台监视方式：watch = 文件监听实时生效；
+   * poll = 轮询兜底（SAF 外部目录不支持监听，或监听启动失败）。
+   */
+  getWatchStatus(): 'watch' | 'poll' {
+    return this.unwatch ? 'watch' : 'poll';
   }
 
   /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：''）。 */
@@ -267,10 +294,14 @@ class FolderStore {
 
   async open(): Promise<void> {
     this.stopWatching();
+    // 切换根目录：旧缓存失效（loadGen++ 让在途的旧加载结果作废）
+    this.cache = null;
+    this.cacheFingerprint = '';
+    this.loadGen++;
     await this.adapter.mkdir(this.itemsDir);
     await this.adapter.mkdir(this.deletedDir);
 
-    // appData 模式可监听 items/ 目录（notify 后端，300ms 去抖）；
+    // 独立后台监视：appData 模式用 notify watch（300ms 去抖）；
     // external 模式（SAF）插件不支持 watch，直接轮询兜底。
     if (this.mode === 'appData') {
       try {
@@ -291,6 +322,10 @@ class FolderStore {
     }
 
     this.onChange?.();
+    // 启动时全量预取一次并共享给所有视图；之后仅在监视到变动时重读
+    void this.reloadCache()
+      .catch(() => undefined)
+      .then(() => this.onItemsChanged?.());
   }
 
   /** 停止目录监听与轮询（切换根目录前调用）。 */
@@ -303,12 +338,10 @@ class FolderStore {
     }
   }
 
-  /** 未删除事项，开始时间落在 [from, to)，含归档项（桌面端 GetUpcoming）。 */
+  /** 未删除事项，开始时间落在 [from, to)，含归档项（桌面端 GetUpcoming；只读内存缓存）。 */
   async getUpcoming(from: Date, to?: Date, limit = 100): Promise<ScheduleEvent[]> {
     const result: ScheduleEvent[] = [];
-    for (const file of await this.enumerateAllFiles()) {
-      const item = await this.parseItemFile(file.path, file.name);
-      if (!item) continue;
+    for (const { item } of await this.ensureCache()) {
       const start = new Date(item.startsAt);
       if (start < from) continue;
       if (to && start >= to) continue;
@@ -326,13 +359,10 @@ class FolderStore {
     return this.getUpcoming(start, end, 500);
   }
 
-  /** 所有未删除事项（仅 items/，未过期项），按优先级排序（桌面端 GetItems）。 */
+  /** 所有未删除事项（仅 items/，未过期项），按优先级排序（桌面端 GetItems；只读内存缓存）。 */
   async getItems(): Promise<ScheduleEvent[]> {
-    const result: ScheduleEvent[] = [];
-    for (const file of await this.enumerateItemFiles()) {
-      const item = await this.parseItemFile(file.path, file.name);
-      if (item) result.push(item);
-    }
+    const cached = await this.ensureCache();
+    const result = cached.filter((c) => !c.archived).map((c) => c.item);
     result.sort(byPriority);
     return result;
   }
@@ -340,7 +370,7 @@ class FolderStore {
   /** 新增事项：写入 items/，返回文件名（桌面端 Insert）。 */
   async insert(item: ScheduleEvent): Promise<string> {
     const fileName = await this.writeItemFile(item, this.itemsDir);
-    this.notifyChanged();
+    this.afterWrite();
     return fileName;
   }
 
@@ -352,7 +382,7 @@ class FolderStore {
     await this.deleteItemFileAnywhere(oldItem);
     const directory = isExpired(newItem) ? await this.getArchiveDirectory(newItem) : this.itemsDir;
     const fileName = await this.writeItemFile(newItem, directory);
-    this.notifyChanged();
+    this.afterWrite();
     return fileName;
   }
 
@@ -365,24 +395,28 @@ class FolderStore {
     await this.adapter.mkdir(this.deletedDir);
     const destination = await this.uniquePath(`${this.deletedDir}/${item.fileName}`);
     await this.adapter.rename(source, destination);
-    this.notifyChanged();
+    this.afterWrite();
     return destination;
   }
 
   /** 把 items/ 中截止已过的事项移入 archive/YYYY/（幂等，桌面端 ArchiveExpiredItems）。 */
   async archiveExpiredItems(): Promise<void> {
+    const cached = await this.ensureCache();
     let changed = false;
-    for (const file of await this.enumerateItemFiles()) {
-      const item = await this.parseItemFile(file.path, file.name);
-      if (!item || !isExpired(item)) continue;
+    for (const { item, archived } of cached) {
+      if (archived || !item.fileName) continue;
+      if (!isExpired(item)) continue;
 
+      const source = `${this.itemsDir}/${item.fileName}`;
+      // 缓存与磁盘之间可能存在竞态：源文件已不在则跳过
+      if (!(await this.adapter.exists(source))) continue;
       const directory = await this.getArchiveDirectory(item);
       await this.adapter.mkdir(directory);
-      const destination = await this.uniquePath(`${directory}/${file.name}`);
-      await this.adapter.rename(file.path, destination);
+      const destination = await this.uniquePath(`${directory}/${item.fileName}`);
+      await this.adapter.rename(source, destination);
       changed = true;
     }
-    if (changed) this.notifyChanged();
+    if (changed) this.afterWrite();
   }
 
   /** 设定截止为长期哨兵（2099-01-01 12:00）并重写文件（桌面端 MarkLongTerm）。 */
@@ -404,7 +438,7 @@ class FolderStore {
   }
 
   async count(): Promise<number> {
-    return (await this.enumerateItemFiles()).length;
+    return (await this.ensureCache()).filter((c) => !c.archived).length;
   }
 
   // ── 内部实现 ──────────────────────────────────────────
@@ -473,20 +507,6 @@ class FolderStore {
     const path = await this.findItemFile(item);
     if (!path) return;
     await this.adapter.remove(path);
-  }
-
-  /** items/ 下所有 .md 文件。 */
-  private async enumerateItemFiles(): Promise<{ path: string; name: string }[]> {
-    return this.listMd(this.itemsDir);
-  }
-
-  /** items/ + 所有 archive/YYYY/ 下的 .md 文件（桌面端 EnumerateAllFiles）。 */
-  private async enumerateAllFiles(): Promise<{ path: string; name: string }[]> {
-    const all = await this.listMd(this.itemsDir);
-    for (const dir of await this.enumerateArchiveDirectories()) {
-      all.push(...(await this.listMd(dir)));
-    }
-    return all;
   }
 
   private async enumerateArchiveDirectories(): Promise<string[]> {
@@ -562,22 +582,85 @@ class FolderStore {
     }
   }
 
-  /** 外部文件变化去抖通知（桌面端 300ms Timer）。 */
-  private scheduleReload(): void {
-    if (this.reloadTimer) clearTimeout(this.reloadTimer);
-    this.reloadTimer = setTimeout(() => this.onItemsChanged?.(), 300);
+  // ── 内存缓存 + 独立后台监视 ─────────────────────────────
+
+  /** 读缓存；未命中时整体重读（与启动预取/监视刷新共享同一加载路径）。 */
+  private async ensureCache(): Promise<{ item: ScheduleEvent; archived: boolean }[]> {
+    if (this.cache) return this.cache;
+    await this.reloadCache();
+    return this.cache ?? [];
   }
 
-  private notifyChanged(): void {
-    // 应用内写操作：直接触发刷新（无需等 watcher）
-    this.onItemsChanged?.();
+  /** 整体重读磁盘并更新缓存，返回数据是否发生变化（指纹比较）。 */
+  private async reloadCache(): Promise<boolean> {
+    const gen = ++this.loadGen;
+    const entries = await this.loadAllFiles();
+    // 已被更新的加载取代：丢弃本次结果，避免旧数据覆盖新缓存
+    if (gen !== this.loadGen) return false;
+    const fp = fingerprintEntries(entries);
+    const changed = fp !== this.cacheFingerprint;
+    this.cache = entries;
+    this.cacheFingerprint = fp;
+    return changed;
+  }
+
+  /** 全量扫描 items/ + archive/，事项正文并发读取（分片限流，避免 IPC 拥塞）。 */
+  private async loadAllFiles(): Promise<{ item: ScheduleEvent; archived: boolean }[]> {
+    const itemFiles = await this.listMd(this.itemsDir);
+    const archiveDirs = await this.enumerateArchiveDirectories();
+    const archivedLists = await Promise.all(archiveDirs.map((d) => this.listMd(d)));
+    const all: { path: string; name: string; archived: boolean }[] = [
+      ...itemFiles.map((f) => ({ ...f, archived: false })),
+      ...archivedLists.flatMap((list) => list.map((f) => ({ ...f, archived: true }))),
+    ];
+    const out: { item: ScheduleEvent; archived: boolean }[] = [];
+    const LIMIT = 24;
+    for (let i = 0; i < all.length; i += LIMIT) {
+      const parsed = await Promise.all(
+        all.slice(i, i + LIMIT).map(async (f) => {
+          const item = await this.parseItemFile(f.path, f.name);
+          return item ? { item, archived: f.archived } : null;
+        }),
+      );
+      for (const p of parsed) if (p) out.push(p);
+    }
+    return out;
+  }
+
+  /** 外部文件变化去抖（桌面端 300ms Timer）：重读缓存，变化才通知视图。 */
+  private scheduleReload(): void {
+    if (this.reloadTimer) clearTimeout(this.reloadTimer);
+    this.reloadTimer = setTimeout(() => void this.pollCheck(), 300);
+  }
+
+  /** 应用内写操作：已知已变更，重读后直接通知视图（不等 watcher）。 */
+  private afterWrite(): void {
+    void this.reloadCache()
+      .catch(() => undefined)
+      .then(() => this.onItemsChanged?.());
+  }
+
+  /** 后台监视的一次检查：重读 + 指纹比对；无变化时只做过期归档检查。 */
+  private async pollCheck(): Promise<void> {
+    let changed = false;
+    try {
+      changed = await this.reloadCache();
+    } catch {
+      return;
+    }
+    if (changed) {
+      this.onItemsChanged?.();
+      return;
+    }
+    // 文件无变化，但可能有事项随时间自然过期 → 归档（有归档动作时内部会再通知）
+    await this.archiveExpiredItems();
   }
 
   private startPolling(): void {
     if (this.pollTimer) return;
     this.pollTimer = setInterval(() => {
       // 移动端无桌面文件管理器场景，30s 兜底足够（SAF 外部目录无 watch 时同样依赖此机制）
-      this.onItemsChanged?.();
+      void this.pollCheck();
     }, 30_000);
   }
 }
