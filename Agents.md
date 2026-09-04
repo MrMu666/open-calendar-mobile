@@ -28,7 +28,7 @@ scripts/
   bump-version.mjs           # CI 版本递增（同步 package.json / tauri.conf.json）
   inject-android-signing.py  # CI 签名注入（init 后改写 build.gradle.kts）
 .github/workflows/
-  build-android.yml          # 推送触发：bump 版本 → init → 断言 MANAGE 权限合并 → 签名 → 构建分架构 APK → 发 Release
+  build-android.yml          # 推送触发：bump 版本 → init → 诊断插件接线 → 签名 → 构建分架构 APK → 断言 MANAGE 权限合并 → 发 Release
 app-icon.png                 # 图标源图（桌面端 Assets/app-256.png 的副本）
 app-icon.json                # tauri icon manifest：android_fg/android_bg/缩放/背景色
 app-icon-fg.png / app-icon-bg.png  # 预处理生成的 Android 前景/背景层（勿手改）

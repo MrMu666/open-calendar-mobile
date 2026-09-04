@@ -64,11 +64,11 @@ jobs:
       - name: Init Android project
         run: npm run tauri android init
 
-      - name: Assert MANAGE_EXTERNAL_STORAGE merged
-        # 本地插件自带 manifest 声明，init 时应自动合并进应用 manifest；失败即停
+      - name: Diagnose plugin wiring
+        # 本地插件的 android 模块应在 init 时接入 gradle（manifest 合并发生在构建期，这里只诊断接线）
         run: |
-          MANIFEST=src-tauri/gen/android/app/src/main/AndroidManifest.xml
-          grep -q "MANAGE_EXTERNAL_STORAGE" "$MANIFEST" && echo "权限已合并" || (echo "::error::MANAGE_EXTERNAL_STORAGE 未合并进 AndroidManifest" && exit 1)
+          cat src-tauri/gen/android/settings.gradle
+          grep -rn "all-files-access\|allfilesaccess" src-tauri/gen/android/settings.gradle src-tauri/gen/android/app/build.gradle.kts 2>/dev/null || echo "::warning::未在 gradle 配置中找到插件引用"
 
       - name: Generate app icons into Android project
         # 先预处理 Android 前景图（缩放居中 + 透明边距，避免图标过大），
@@ -101,6 +101,16 @@ jobs:
       - name: Build Android APKs (split per ABI)
         # --split-per-abi：为 arm64-v8a / armeabi-v7a / x86 / x86_64 各产出一个独立 APK
         run: npm run tauri android build -- --apk --split-per-abi
+
+      - name: Assert MANAGE_EXTERNAL_STORAGE merged
+        # 插件 manifest 经 Gradle manifest merger 合并，查构建中间产物确认；失败即停
+        run: |
+          if grep -rq "MANAGE_EXTERNAL_STORAGE" src-tauri/gen/android/app/build/intermediates/; then
+            echo "权限已合并进 APK"
+          else
+            echo "::error::MANAGE_EXTERNAL_STORAGE 未合并（插件 android 模块可能未接入，见 Diagnose 步骤日志）"
+            exit 1
+          fi
 
       - name: Collect APKs with ABI names
         # 输出目录结构：apk/<abi>/release/*.apk（abi = aarch64/armv7/i686/x86_64）
