@@ -39,12 +39,14 @@ src/
   types.ts                   # ScheduleEvent / 视图类型（对齐桌面端 Models）
   lib/
     store.ts                 # FolderItemStore 移植：文件名解析/归档/删除/监听
+    allFilesAccess.ts        # 所有文件访问授权桥（invoke 本地插件，桌面/dev 无插件时返回 false）
     lunar.ts                 # 农历（lunar-javascript 封装，含闰月处理）
     format.ts                # 时间格式化（yyyyMMdd-HHmmss / 中文显示）
     tags.ts                  # 标签（工作/生活/学习/健康/财务）
     settings.ts              # 设置读写（$APPDATA/settings.json，与数据目录独立）
   components/
     TabBar.tsx / CalendarView.tsx / TasksView.tsx / ItemEditor.tsx / SettingsView.tsx / ItemCard.tsx
+    FolderPicker.tsx         # 应用内目录浏览器（外部绝对路径选择，限 /storage/emulated/0 内）
 src-tauri/
   tauri.conf.json            # version 指向 ../package.json（版本唯一来源）
   capabilities/default.json  # fs 权限（app 递归读写 + watch + 外部路径 scope）与插件权限
@@ -62,7 +64,8 @@ src-tauri/
   - **external（用户指定）**：外部绝对路径（如 `/storage/emulated/0/Download`），
     无 baseDir 直接访问，需 Android 所有文件访问权限（`MANAGE_EXTERNAL_STORAGE`，
     经自研 `all-files-access` 插件跳设置页开启）+ capabilities 的 `fs:scope` 放行
-    `/storage/emulated/0/**`。两种后端监听（watch）同级生效，无 SAF 式轮询特例。
+    `/storage/emulated/0/**`。两种后端均监听**数据根目录**（`recursive: true`，
+  items/+archive/ 全覆盖；纯 `deleted/` 内事件直接丢弃不重读）。
   切换后仅显示新目录事项，旧目录数据保留。根目录下 `items/*.md` 文件名即数据，
   格式 `items/yyyyMMdd-HHmmss_yyyyMMdd-HHmmss_P<级别>_<净化标题>[_<标签>].md`
   （规则与桌面端 `存储目录设计.md` 相同）。
@@ -78,15 +81,16 @@ src-tauri/
 - **文件监听 + 内存缓存 + 持久化缓存**：`store.ts` 的 FolderStore 单例拥有独立后台监视、
   内存缓存（`cache`/`cacheFingerprint`/`loadGen`）与 localStorage 持久化缓存
   （key 按存储位置隔离，`PERSISTED_CACHE_VERSION` 控制失效），三视图共享：`open()` 先同步
-  用持久化缓存预热内存（首屏即时），再启动时全量预取一次，之后仅在监视到变动时整体重读；
-  `getUpcoming/getItems/count` 只读内存。重读时以 **mtime+size 双相等** 为命中条件跳过正文
-  （SAF 的 `readDir` 自带 size/lastModified，appData 端走 `stat`；取不到元数据回退必读，
-  宁慢勿脏）；应用内写后与每 10 次轮询强制全读正文，防粗粒度 mtime/保留时间戳漏检。
+  用持久化缓存预热内存（首屏即时），再启动时全量预取一次，之后主要在监视到变动时整体重读
+  （另有每 10 次轮询强制全读一次兜底）；`getUpcoming/getItems/count` 只读内存。
+  重读时以 **mtime+size 双相等** 为命中条件跳过正文（元数据缺失时走 `stat`；
+  取不到元数据回退必读，宁慢勿脏）；应用内写后强制全读正文，防粗粒度 mtime/保留时间戳漏检。
   底层监视用 `@tauri-apps/plugin-fs` 的 `watch`（notify 后端，300ms 去抖，需 Rust 侧
   `features=["watch"]` + 权限 `fs:allow-watch`）；监听失败时降级为 30s 轮询兜底
   （`pollCheck()` 重读 + 指纹比对，无变化不通知视图，只做过期归档检查）。
   应用内写操作走 `afterWrite()` 重读后通知，不等 watcher。监视状态经
-  `getWatchStatus()` 暴露，设置页底部"文件监视"区块据此提示（watch 生效 / SAF 轮询 / 降级轮询）。
+  `getWatchStatus()` 暴露（失败原因经 `getWatchError()`），设置页底部"文件监视"区块据此提示
+  （watch 生效 / 降级轮询 + 失败原因）。
 
 ### 版本号
 - **`package.json` 是版本唯一来源**；`tauri.conf.json` 的 `"version": "../package.json"` 引用它。
@@ -124,14 +128,16 @@ src-tauri/
 - `fs:default` + `fs:allow-app-read-recursive` / `fs:allow-app-write-recursive` /
   `fs:allow-app-meta-recursive`（$APPDATA 递归读写，含 mkdir/remove/rename/readDir）
 - `fs:allow-watch` / `fs:allow-unwatch`（文件监听，含外部绝对路径）
-- `fs:scope` 放行 `/storage/emulated/0/**`（外部直连目录用，见上）
+- `fs:scope` 放行 `/storage/emulated/0` 及其下所有（`/**/*` 覆盖不到根目录本身，
+  FolderPicker 首屏依赖它；SD 卡等其他挂载点不在范围内，选了会监听失败）
 - `all-files-access:default`（本地插件：授权查询 + 跳设置页）
 - `core:default`、`opener:default`
 - **不要随意收紧/放宽**：前端所有 IO 都走这些权限；Android 上 `$APPDATA` 即应用私有目录。
 
 ### 与桌面端的差异（刻意为之）
 - 移动端在应用数据目录（`$APPDATA`）下由用户指定数据根目录（默认 `calendar/`），
-  不能选系统任意文件夹（Android SAF 在 Tauri v2 的 dialog/fs 插件中不完整）；
+  外部绝对路径经自建 `FolderPicker` 浏览器选择（限 `/storage/emulated/0` 内，
+  需 MANAGE 授权；不用系统 SAF 选择器，其 content:// URI 转绝对路径不可靠）；
   数据可直接从桌面端 `items/` 拷贝迁移。
 - 无开机自启、无系统托盘、无玻璃壁纸效果（桌面端核心特色，移动端不适用）。
 - 桌面端用 `FileSystemWatcher`；移动端用 fs 插件 watch + 轮询兜底。
@@ -142,8 +148,7 @@ src-tauri/
   **`.app` 必须声明 `color: var(--text)`**：`html/body` 的 `var(--text)` 解析自 `:root`（暗色值），
   不在此处覆盖时所有靠继承取色的元素在亮色下仍为白字（已踩坑）。
 - **外部绝对路径后端注意事项**：路径经 `sanitizeExternalPath` 校验（必须 `/` 开头、
-  禁 `..`）；`directFsAdapter` 用绝对路径调 fs 插件（不传 baseDir），`rename` 同目录
-  内直接改名（无 SAF 跨目录限制）；写入前 `mkdir` 验证，失败（无授权/路径非法）即
+  禁 `..`）；`directFsAdapter` 用绝对路径调 fs 插件（不传 baseDir），同目录内直接改名；写入前 `mkdir` 验证，失败（无授权/路径非法）即
   回退 appData。`fs:scope` 目前按 `/storage/emulated/0/**` 静态放行（MANAGE 授权
   本就覆盖该范围），收紧需改 capabilities。
 - **Android 状态栏**：Tauri 默认 `enableEdgeToEdge()` 沉浸式，`.app` 已加

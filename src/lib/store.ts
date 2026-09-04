@@ -272,8 +272,8 @@ class FolderStore {
 
   private mode: 'appData' | 'external' = 'appData';
   private adapter: StorageAdapter = appDataAdapter;
-  /** watch 用的实际路径：appData 为 null（走 itemsDir + baseDir），external 为绝对路径。 */
-  private absItemsDir: string | null = null;
+  /** watch 用的实际根路径：appData 为 null（走 root + baseDir），external 为绝对路径。 */
+  private absRoot: string | null = null;
   /** 最近一次 watch 启动失败的原因（成功则为 null），供设置页诊断展示。 */
   private watchError: string | null = null;
 
@@ -296,7 +296,7 @@ class FolderStore {
   /** 存储目录打开/切换后触发（初始化后立即触发一次）。 */
   onChange: (() => void) | null = null;
 
-  /** items/ 目录内容变化后触发（去抖），含应用外部改动。 */
+  /** 数据根目录内容变化后触发（去抖，已过滤 deleted/ 纯内部变动），含应用外部改动。 */
   onItemsChanged: (() => void) | null = null;
 
   /** 当前存储模式。 */
@@ -327,7 +327,7 @@ class FolderStore {
     const cleaned = sanitizeRootPath(dataDir);
     this.mode = 'appData';
     this.adapter = appDataAdapter;
-    this.absItemsDir = null;
+    this.absRoot = null;
     this.root = cleaned;
     this.itemsDir = `${cleaned}/items`;
     this.archiveDir = `${cleaned}/archive`;
@@ -340,7 +340,7 @@ class FolderStore {
     const base = sanitizeExternalPath(absPath);
     this.mode = 'external';
     this.adapter = directFsAdapter(base);
-    this.absItemsDir = `${base}/items`;
+    this.absRoot = base;
     this.root = base;
     this.itemsDir = 'items';
     this.archiveDir = 'archive';
@@ -357,21 +357,16 @@ class FolderStore {
     await this.adapter.mkdir(this.itemsDir);
     await this.adapter.mkdir(this.deletedDir);
 
-    // 独立后台监视：两种后端都走 fs 直接路径，notify watch 同级生效；
-    // 注意必须用绝对路径（adapter 内部拼接 base，watch 调用绕不过去）；
+    // 独立后台监视：盯数据根目录（items/+archive/ 全覆盖，deleted/ 事件过滤掉）；
+    // adapter 只管读写拼 base，watch 必须拿完整可监视路径；
     // 监听失败时降级为轮询兜底。
     try {
       // external 用绝对路径（无 baseDir），appData 用相对路径 + baseDir
-      this.unwatch = this.absItemsDir
-        ? await watch(this.absItemsDir, () => this.scheduleReload(), {
-            recursive: false,
-            delayMs: 300,
-          })
-        : await watch(this.itemsDir, () => this.scheduleReload(), {
-            baseDir: BaseDirectory.AppData,
-            recursive: false,
-            delayMs: 300,
-          });
+      const watchTarget = this.absRoot ?? this.root;
+      const watchOpts = this.absRoot
+        ? { recursive: true, delayMs: 300 }
+        : { baseDir: BaseDirectory.AppData, recursive: true, delayMs: 300 };
+      this.unwatch = await watch(watchTarget, (event) => this.scheduleReload(event), watchOpts);
       this.watchError = null;
     } catch (err) {
       // 某些 Android 文件系统上 notify 可能不可用：降级为轮询兜底
@@ -789,7 +784,20 @@ class FolderStore {
   }
 
   /** 外部文件变化去抖（桌面端 300ms Timer）：重读缓存，变化才通知视图。 */
-  private scheduleReload(): void {
+  private scheduleReload(event?: { paths?: unknown }): void {
+    if (event && Array.isArray(event.paths)) {
+      const paths = event.paths
+        .filter((p): p is string => typeof p === 'string')
+        .map((p) => p.replace(/\\/g, '/'));
+      // 仅 deleted/ 内变动（软删除区不展示，如手动清理）：跳过重读；
+      // 改名跨目录事件会同时带上新旧两条路径，不会被误杀
+      if (
+        paths.length > 0 &&
+        paths.every((p) => /\/deleted\//.test(p) && !/(\/items\/|\/archive\/)/.test(p))
+      ) {
+        return;
+      }
+    }
     if (this.reloadTimer) clearTimeout(this.reloadTimer);
     this.reloadTimer = setTimeout(() => void this.pollCheck(), 300);
   }
