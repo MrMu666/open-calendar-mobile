@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { appDataDir } from '@tauri-apps/api/path';
-import { getFolderInfo, isScopedStorageError, pickFolder } from 'tauri-plugin-scoped-storage-api';
 import type { Theme, UserSettings } from '../lib/settings';
 import { ACCENT_PRESETS, DEFAULT_SETTINGS } from '../lib/settings';
-import { store } from '../lib/store';
+import { isAllFilesAccessGranted, openAllFilesAccessSettings } from '../lib/allFilesAccess';
+import { sanitizeExternalPath, store } from '../lib/store';
 
 interface Props {
   settings: UserSettings;
@@ -16,7 +16,8 @@ interface Props {
 export default function SettingsView({ settings, onChange, refreshTick }: Props) {
   const [appDir, setAppDir] = useState('');
   const [dirError, setDirError] = useState('');
-  const [externalInfo, setExternalInfo] = useState<{ name: string; uri: string } | null>(null);
+  const [granted, setGranted] = useState<boolean | null>(null);
+  const [pathDraft, setPathDraft] = useState(settings.externalPath);
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [version, setVersion] = useState('');
 
@@ -39,36 +40,53 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     };
   }, [refreshTick]);
 
-  // external 模式下展示所选文件夹名称与 URI
+  // 所有文件访问授权状态：挂载/刷新时查一次，从系统设置页返回时（页面重新可见）再查
   useEffect(() => {
-    if (settings.storageMode !== 'external' || !settings.folderId) {
-      setExternalInfo(null);
-      return;
-    }
     let cancelled = false;
-    getFolderInfo(settings.folderId)
-      .then((f) => {
-        if (!cancelled) setExternalInfo({ name: f.name ?? '外部目录', uri: f.uri ?? '' });
-      })
-      .catch(() => {
-        if (!cancelled) setExternalInfo(null);
+    const check = () => {
+      void isAllFilesAccessGranted().then((g) => {
+        if (!cancelled) setGranted(g);
       });
+    };
+    check();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [settings.storageMode, settings.folderId]);
+  }, [refreshTick]);
 
-  /** 打开系统 SAF 目录选择器（从手机存储根开始），选定后切换为外部存储模式。 */
-  const handlePickFolder = async (): Promise<void> => {
+  // external 模式下输入框跟随已保存路径
+  useEffect(() => {
+    setPathDraft(settings.externalPath);
+  }, [settings.externalPath]);
+
+  /** 跳系统设置页开启所有文件访问权限。 */
+  const handleOpenSettings = async (): Promise<void> => {
     setDirError('');
     try {
-      const folder = await pickFolder();
-      if (!folder) return;
-      await store.setExternalFolder(folder.id);
-      onChange({ storageMode: 'external', folderId: folder.id });
+      await openAllFilesAccessSettings();
     } catch (err) {
-      if (isScopedStorageError(err) && err.code === 'CANCELLED') return; // 用户取消，静默
-      setDirError(err instanceof Error ? err.message : '选择文件夹失败。');
+      setDirError(err instanceof Error ? err.message : '打开系统设置失败。');
+    }
+  };
+
+  /** 使用输入的外部绝对路径（需先授权，路径不存在会自动创建 items/ 验证）。 */
+  const handleUsePath = async (): Promise<void> => {
+    setDirError('');
+    try {
+      const base = sanitizeExternalPath(pathDraft);
+      if (granted !== true) {
+        setDirError('请先开启所有文件访问权限。');
+        return;
+      }
+      await store.setExternalPath(base);
+      onChange({ storageMode: 'external', externalPath: base });
+    } catch (err) {
+      setDirError(err instanceof Error ? err.message : '切换目录失败。');
     }
   };
 
@@ -77,7 +95,7 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     setDirError('');
     try {
       await store.setRoot(DEFAULT_SETTINGS.dataDir);
-      onChange({ storageMode: 'appData', dataDir: DEFAULT_SETTINGS.dataDir, folderId: '' });
+      onChange({ storageMode: 'appData', dataDir: DEFAULT_SETTINGS.dataDir, externalPath: '' });
     } catch (err) {
       setDirError(err instanceof Error ? err.message : '恢复默认目录失败。');
     }
@@ -128,19 +146,9 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
         <div className="setting-info">
           <span className="setting-label">存储目录</span>
           <span className="setting-value mono">
-            {isExternal
-              ? externalInfo
-                ? `${externalInfo.name}（外部目录）`
-                : '外部目录'
-              : `应用数据 / ${settings.dataDir}`}
+            {isExternal ? `${settings.externalPath || '（未设置）'}（外部目录）` : `应用数据 / ${settings.dataDir}`}
           </span>
         </div>
-        {isExternal && externalInfo && (
-          <div className="setting-info">
-            <span className="setting-label">完整路径</span>
-            <span className="setting-value mono">{externalInfo.uri}/items</span>
-          </div>
-        )}
         {!isExternal && appDir && (
           <div className="setting-info">
             <span className="setting-label">完整路径</span>
@@ -149,9 +157,46 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
             </span>
           </div>
         )}
+        <div className="setting-info">
+          <span className="setting-label">所有文件访问</span>
+          <span className="setting-value">
+            {granted === null ? '检测中…' : granted ? '已授权' : '未授权'}
+          </span>
+        </div>
+        {granted !== true && (
+          <div className="dir-row">
+            <button type="button" className="btn small primary" onClick={() => void handleOpenSettings()}>
+              去系统设置开启…
+            </button>
+          </div>
+        )}
+        <div className="setting-info">
+          <span className="setting-label">外部目录</span>
+          <input
+            className="input mono"
+            inputMode="text"
+            placeholder="/storage/emulated/0/Download"
+            value={pathDraft}
+            onChange={(e) => setPathDraft(e.target.value)}
+          />
+        </div>
         <div className="dir-row">
-          <button type="button" className="btn small primary" onClick={() => void handlePickFolder()}>
-            选择目录…
+          <button type="button" className="btn small primary" onClick={() => void handleUsePath()}>
+            使用该目录
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => setPathDraft('/storage/emulated/0/Download')}
+          >
+            Download
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => setPathDraft('/storage/emulated/0/Documents')}
+          >
+            Documents
           </button>
           <button type="button" className="btn small" onClick={() => void handleReset()}>
             恢复默认
@@ -159,11 +204,11 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
         </div>
         {dirError && <p className="editor-error">{dirError}</p>}
         <p className="settings-note">
-          「选择目录…」会打开系统文件夹选择器，可浏览手机根目录及任意位置，选定后
-          需要授予该文件夹的访问权限（仅限所选文件夹，可随时撤销）。事项以 Markdown
-          文件保存在所选目录下（items / archive / deleted），结构与桌面版一致；
-          切换目录后仅显示新目录中的事项，原目录数据保留在设备上。应用设置保存在
-          独立的 settings.json，不随目录迁移。
+          外部目录通过绝对路径直接访问（需先开启所有文件访问权限），监听与应用数据
+          目录同级实时生效。事项以 Markdown 文件保存在所选目录下
+          （items / archive / deleted），结构与桌面版一致；切换目录后仅显示新目录
+          中的事项，原目录数据保留在设备上。应用设置保存在独立的 settings.json，
+          不随目录迁移。
         </p>
         <div className="setting-info">
           <span className="setting-label">未归档事项</span>
@@ -190,7 +235,7 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
           </p>
         ) : isExternal ? (
           <p className="settings-note">
-            实时监听不可用：外部目录不支持文件监听，当前每 30
+            实时监听不可用：外部目录未授权或监听启动失败，当前每 30
             秒轮询一次刷新；应用内修改会即时显示。
           </p>
         ) : (
