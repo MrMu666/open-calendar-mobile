@@ -1,0 +1,3 @@
+[default]
+description = "默认暴露全部所有文件访问权限命令（check 查询授权，settings 跳设置页）。"
+permissions = ["allow-check", "allow-settings"]

@@ -1,0 +1,14 @@
+[package]
+name = "tauri-plugin-all-files-access"
+version = "0.1.0"
+description = "Check and request Android all-files access (MANAGE_EXTERNAL_STORAGE) for OpenCalendar."
+edition = "2021"
+authors = ["open-calendar-mobile"]
+license = "MIT"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
