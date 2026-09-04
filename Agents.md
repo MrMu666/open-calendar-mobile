@@ -9,7 +9,8 @@
 - 日历月视图：6×7 网格、农历显示、事项圆点（存在未到期事项=红，仅有已到期事项=绿，色值同事项卡片起止日期）、选中日日程列表
 - 事项列表：未到期事项、优先级/标签、展开详情、设为长期/已完成、删除
 - 编辑器：底部弹层，标题/开始/截止时间、标签、优先级、Markdown 内容
-- 设置：亮色/暗色主题切换（默认亮色）、强调色、自定义数据存储目录（桌面端的"开机自启/背景色/透明度"在移动端无对应项）
+- 设置：亮色/暗色主题切换（默认亮色）、强调色、自定义数据存储目录（appData 子目录 或
+  外部绝对路径，后者需 Android 所有文件访问权限；桌面端的"开机自启/背景色/透明度"在移动端无对应项）
 
 ## 技术栈
 
@@ -27,7 +28,7 @@ scripts/
   bump-version.mjs           # CI 版本递增（同步 package.json / tauri.conf.json）
   inject-android-signing.py  # CI 签名注入（init 后改写 build.gradle.kts）
 .github/workflows/
-  build-android.yml          # 推送触发：bump 版本 → init → 签名 → 构建分架构 APK → 发 Release
+  build-android.yml          # 推送触发：bump 版本 → init → 断言 MANAGE 权限合并 → 签名 → 构建分架构 APK → 发 Release
 app-icon.png                 # 图标源图（桌面端 Assets/app-256.png 的副本）
 app-icon.json                # tauri icon manifest：android_fg/android_bg/缩放/背景色
 app-icon-fg.png / app-icon-bg.png  # 预处理生成的 Android 前景/背景层（勿手改）
@@ -46,22 +47,23 @@ src/
     TabBar.tsx / CalendarView.tsx / TasksView.tsx / ItemEditor.tsx / SettingsView.tsx / ItemCard.tsx
 src-tauri/
   tauri.conf.json            # version 指向 ../package.json（版本唯一来源）
-  capabilities/default.json  # fs 权限（app 递归读写 + watch）
-  src/lib.rs                 # 注册 fs / opener 插件
+  capabilities/default.json  # fs 权限（app 递归读写 + watch + 外部路径 scope）与插件权限
+  src/lib.rs                 # 注册 fs / opener / all-files-access 插件
+  plugins/all-files-access/  # 本地移动插件：MANAGE_EXTERNAL_STORAGE 声明+授权桥（Rust+Kotlin），
+                             # manifest 随 tauri android init 自动合并，改动只改这里
 ```
 
 ## 关键架构决策
 
 ### 数据存储：文件夹 Markdown（与桌面端完全一致，可迁移）
-- **唯一存储是 `store.ts`（FolderStore 单例）**，两种后端（`StorageAdapter` 抽象）：
-  - **appData（默认）**：`$APPDATA` 下任意子目录（默认 `calendar`），走
-    `@tauri-apps/plugin-fs`，可 watch 文件变化。
-  - **external（用户选定）**：通过系统 SAF 目录选择器（`tauri-plugin-scoped-storage`
-    的 `pickFolder()`，从手机存储根开始浏览）选定任意外部目录（如根目录/Download），
-    内部用 content:// 树 URI + `takePersistableUriPermission`，权限跨重启持久、
-    仅限所选文件夹；不支持 watch，仅轮询刷新。
-  切换后仅显示新目录事项，旧目录数据保留。**不要用 `@tauri-apps/plugin-dialog` 的
-  目录选择**（Android 上返回 content:// URI、无持久权限、fs 插件不可读写，已踩坑）。根目录下 `items/*.md` 文件名即数据，
+- **唯一存储是 `store.ts`（FolderStore 单例）**，两种后端（`StorageAdapter` 抽象，
+  均为 `@tauri-apps/plugin-fs` 直接读写）：
+  - **appData（默认）**：`$APPDATA` 下任意子目录（默认 `calendar`），`baseDir = AppData`。
+  - **external（用户指定）**：外部绝对路径（如 `/storage/emulated/0/Download`），
+    无 baseDir 直接访问，需 Android 所有文件访问权限（`MANAGE_EXTERNAL_STORAGE`，
+    经自研 `all-files-access` 插件跳设置页开启）+ capabilities 的 `fs:scope` 放行
+    `/storage/emulated/0/**`。两种后端监听（watch）同级生效，无 SAF 式轮询特例。
+  切换后仅显示新目录事项，旧目录数据保留。根目录下 `items/*.md` 文件名即数据，
   格式 `items/yyyyMMdd-HHmmss_yyyyMMdd-HHmmss_P<级别>_<净化标题>[_<标签>].md`
   （规则与桌面端 `存储目录设计.md` 相同）。
 - **归档**：截止已过的事项移入 `<root>/archive/YYYY/`；删除进 `<root>/deleted/`（软删除）。
@@ -120,7 +122,9 @@ src-tauri/
 ### 权限（capabilities/default.json）
 - `fs:default` + `fs:allow-app-read-recursive` / `fs:allow-app-write-recursive` /
   `fs:allow-app-meta-recursive`（$APPDATA 递归读写，含 mkdir/remove/rename/readDir）
-- `fs:allow-watch` / `fs:allow-unwatch`（文件监听）
+- `fs:allow-watch` / `fs:allow-unwatch`（文件监听，含外部绝对路径）
+- `fs:scope` 放行 `/storage/emulated/0/**`（外部直连目录用，见上）
+- `all-files-access:default`（本地插件：授权查询 + 跳设置页）
 - `core:default`、`opener:default`
 - **不要随意收紧/放宽**：前端所有 IO 都走这些权限；Android 上 `$APPDATA` 即应用私有目录。
 
@@ -130,16 +134,17 @@ src-tauri/
   数据可直接从桌面端 `items/` 拷贝迁移。
 - 无开机自启、无系统托盘、无玻璃壁纸效果（桌面端核心特色，移动端不适用）。
 - 桌面端用 `FileSystemWatcher`；移动端用 fs 插件 watch + 轮询兜底。
-- 设置：亮/暗主题（**默认亮色**）+ 强调色 + 数据目录（appData 子目录 或 SAF 外部目录），
-  存 `$APPDATA/settings.json`（与数据目录独立）。external 模式的 `folderId` 由
-  scoped-storage 插件持久化，应用启动时用 `listFolders()` 校验句柄仍有效，失效则回退 appData。
+- 设置：亮/暗主题（**默认亮色**）+ 强调色 + 数据目录（appData 子目录 或外部绝对路径），
+  存 `$APPDATA/settings.json`（与数据目录独立）。external 模式存 `externalPath`，
+  应用启动时校验所有文件访问授权仍有效，失效则回退 appData。
   主题在 `App.tsx` 切换 `theme-dark`/`theme-light` class，两套配色定义在 `App.css` 变量区。
   **`.app` 必须声明 `color: var(--text)`**：`html/body` 的 `var(--text)` 解析自 `:root`（暗色值），
   不在此处覆盖时所有靠继承取色的元素在亮色下仍为白字（已踩坑）。
-- **SAF 外部目录后端注意事项**：`store.ts` 的 `scopedStorageAdapter.rename` 用插件的
-  `move`（复制+删除）而非 `rename`（SAF `DocumentFile.renameTo` 不能跨父目录移动，
-  而归档/软删除都要跨目录）；写入用 `writeTextFile(..., { recursive: true })`；
-  路径必须相对所选文件夹根（插件拒绝 `..`/绝对路径）。
+- **外部绝对路径后端注意事项**：路径经 `sanitizeExternalPath` 校验（必须 `/` 开头、
+  禁 `..`）；`directFsAdapter` 用绝对路径调 fs 插件（不传 baseDir），`rename` 同目录
+  内直接改名（无 SAF 跨目录限制）；写入前 `mkdir` 验证，失败（无授权/路径非法）即
+  回退 appData。`fs:scope` 目前按 `/storage/emulated/0/**` 静态放行（MANAGE 授权
+  本就覆盖该范围），收紧需改 capabilities。
 - **Android 状态栏**：Tauri 默认 `enableEdgeToEdge()` 沉浸式，`.app` 已加
   `padding-top: env(safe-area-inset-top)` 避让顶部状态栏（底部 TabBar/弹层同样处理）。
 - **Android 图标**：桌面端图标内容满幅（98%），直接做自适应图标前景会视觉过大。
