@@ -73,10 +73,14 @@ src-tauri/
   已完成事项仍显示在它开始的那天，可继续编辑/设为长期/删除（与桌面端 GetUpcoming 语义一致）。
   日历圆点颜色：该日存在未到期事项=红（`var(--red)`，同 `.item-end`）、仅有已到期事项=绿
   （`var(--green)`，同 `.item-start`）、无事项隐藏；选中格圆点为白色（CSS 覆盖）。
-- **文件监听 + 内存缓存**：`store.ts` 的 FolderStore 单例拥有独立后台监视与内存缓存
-  （`cache`/`cacheFingerprint`/`loadGen`），三视图共享：`open()` 启动时全量预取一次
-  （事项正文 24 并发读），之后仅在监视到变动时整体重读；`getUpcoming/getItems/count`
-  只读内存。底层用 `@tauri-apps/plugin-fs` 的 `watch`（notify 后端，300ms 去抖，需 Rust 侧
+- **文件监听 + 内存缓存 + 持久化缓存**：`store.ts` 的 FolderStore 单例拥有独立后台监视、
+  内存缓存（`cache`/`cacheFingerprint`/`loadGen`）与 localStorage 持久化缓存
+  （key 按存储位置隔离，`PERSISTED_CACHE_VERSION` 控制失效），三视图共享：`open()` 先同步
+  用持久化缓存预热内存（首屏即时），再启动时全量预取一次，之后仅在监视到变动时整体重读；
+  `getUpcoming/getItems/count` 只读内存。重读时以 **mtime+size 双相等** 为命中条件跳过正文
+  （SAF 的 `readDir` 自带 size/lastModified，appData 端走 `stat`；取不到元数据回退必读，
+  宁慢勿脏）；应用内写后与每 10 次轮询强制全读正文，防粗粒度 mtime/保留时间戳漏检。
+  底层监视用 `@tauri-apps/plugin-fs` 的 `watch`（notify 后端，300ms 去抖，需 Rust 侧
   `features=["watch"]` + 权限 `fs:allow-watch`）；监听失败时降级为 30s 轮询兜底
   （`pollCheck()` 重读 + 指纹比对，无变化不通知视图，只做过期归档检查）。
   应用内写操作走 `afterWrite()` 重读后通知，不等 watcher。监视状态经

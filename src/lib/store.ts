@@ -6,6 +6,7 @@ import {
   readTextFile as fsReadTextFile,
   remove as fsRemove,
   rename as fsRename,
+  stat as fsStat,
   watch,
   writeTextFile as fsWriteTextFile,
 } from '@tauri-apps/plugin-fs';
@@ -63,6 +64,10 @@ export interface DirEntry {
   name: string;
   isFile: boolean;
   isDir: boolean;
+  /** 文件字节数（SAF readDir 自带；appData 端无，走 stat）。 */
+  size?: number | null;
+  /** 最后修改毫秒时间戳（SAF readDir 自带；appData 端无，走 stat）。 */
+  mtimeMs?: number | null;
 }
 
 /** 存储后端：所有路径均为相对各后端根目录的路径。 */
@@ -72,6 +77,8 @@ export interface StorageAdapter {
   readTextFile(path: string): Promise<string>;
   writeTextFile(path: string, contents: string): Promise<void>;
   exists(path: string): Promise<boolean>;
+  /** 取文件元数据；取不到返回 null（调用方回退为必读正文，宁慢勿脏）。 */
+  stat(path: string): Promise<{ mtime: number; size: number } | null>;
   rename(oldPath: string, newPath: string): Promise<void>;
   remove(path: string): Promise<void>;
 }
@@ -97,6 +104,15 @@ const appDataAdapter: StorageAdapter = {
   async exists(path) {
     return fsExists(path, { baseDir: BaseDirectory.AppData });
   },
+  async stat(path) {
+    try {
+      const info = await fsStat(path, { baseDir: BaseDirectory.AppData });
+      if (info.mtime == null) return null;
+      return { mtime: info.mtime.getTime(), size: info.size };
+    } catch {
+      return null;
+    }
+  },
   async rename(oldPath, newPath) {
     await fsRename(oldPath, newPath, {
       oldPathBaseDir: BaseDirectory.AppData,
@@ -115,10 +131,13 @@ function scopedStorageAdapter(folderId: string): StorageAdapter {
       await scoped.mkdir(folderId, path, true);
     },
     async readDir(path) {
+      // SAF readDir 条目自带 size/lastModified（Unix 秒），省掉逐文件 stat
       return (await scoped.readDir(folderId, path || undefined)).map((e) => ({
         name: e.name,
         isFile: e.isFile,
         isDir: e.isDir,
+        size: e.size ?? null,
+        mtimeMs: e.lastModified != null ? e.lastModified * 1000 : null,
       }));
     },
     async readTextFile(path) {
@@ -130,6 +149,15 @@ function scopedStorageAdapter(folderId: string): StorageAdapter {
     },
     async exists(path) {
       return scoped.exists(folderId, path);
+    },
+    async stat(path) {
+      try {
+        const info = await scoped.stat(folderId, path);
+        if (info.lastModified == null || info.size == null) return null;
+        return { mtime: info.lastModified * 1000, size: info.size };
+      } catch {
+        return null;
+      }
     },
     async rename(oldPath, newPath) {
       // 跨目录移动（items → archive/YYYY、items → deleted）用 move（复制+删除），
@@ -190,8 +218,7 @@ function isExpired(item: ScheduleEvent): boolean {
 }
 
 /** 缓存指纹：文件名 + 时间 + 优先级 + 标题 + 标签 + 正文，用于判断磁盘数据是否真变了。 */
-function fingerprintEntries(entries: { item: ScheduleEvent; archived: boolean }[]): string {
-  return entries
+function fingerprintEntries(entries: { item: ScheduleEvent; archived: boolean }[]): string {  return entries
     .map(
       (e) =>
         `${e.archived ? 1 : 0}|${e.item.fileName ?? ''}|${e.item.startsAt}|${e.item.endsAt ?? ''}|${e.item.priority}|${e.item.title}|${e.item.tags}|${e.item.notes ?? ''}`,
@@ -199,6 +226,21 @@ function fingerprintEntries(entries: { item: ScheduleEvent; archived: boolean }[
     .sort()
     .join('\n');
 }
+
+/**
+ * 持久化缓存条目（localStorage，按存储根分 key，跨启动保留）。
+ * 命中条件 = mtime 与 size 双相等：单看 mtime 会踩粗粒度文件系统（如 FAT 2 秒）与
+ * 保留时间戳的拷贝，单看 size 会漏同长度修改；两者同时不变才可认为内容无变动。
+ */
+interface PersistedFile {
+  mtime: number;
+  size: number;
+  archived: boolean;
+  item: ScheduleEvent;
+}
+
+/** 持久化缓存版本号：解析规则变化时递增，旧缓存整体作废。 */
+const PERSISTED_CACHE_VERSION = 1;
 
 /** 排序：开始时间 → 标题（桌面端 GetUpcoming）。 */
 function byStart(a: ScheduleEvent, b: ScheduleEvent): number {
@@ -234,6 +276,8 @@ class FolderStore {
   private cache: { item: ScheduleEvent; archived: boolean }[] | null = null;
   private cacheFingerprint = '';
   private loadGen = 0;
+  /** 轮询计数：每 10 次强制全量读正文一次，兜底 mtime 被刻意保留的外部修改。 */
+  private pollCount = 0;
 
   /** 存储目录打开/切换后触发（初始化后立即触发一次）。 */
   onChange: (() => void) | null = null;
@@ -322,6 +366,8 @@ class FolderStore {
     }
 
     this.onChange?.();
+    // 启动时先同步用持久化缓存预热内存（首屏即时），再后台按 mtime/size 增量刷新
+    this.hydrateFromPersistent();
     // 启动时全量预取一次并共享给所有视图；之后仅在监视到变动时重读
     void this.reloadCache()
       .catch(() => undefined)
@@ -518,16 +564,61 @@ class FolderStore {
     }
   }
 
-  private async listMd(dir: string): Promise<{ path: string; name: string }[]> {
+  private async listMd(
+    dir: string,
+  ): Promise<{ path: string; name: string; size?: number; mtimeMs?: number }[]> {
     try {
       const entries = await this.adapter.readDir(dir);
       return entries
         .filter((e) => e.isFile && e.name.endsWith('.md'))
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map((e) => ({ path: `${dir}/${e.name}`, name: e.name }));
+        .map((e) => ({
+          path: `${dir}/${e.name}`,
+          name: e.name,
+          size: e.size ?? undefined,
+          mtimeMs: e.mtimeMs ?? undefined,
+        }));
     } catch {
       return [];
     }
+  }
+
+  // ── 持久化缓存（localStorage，跨启动） ───────────────────
+
+  /** 缓存 key 按存储位置隔离：切换目录互不干扰。 */
+  private persistedKey(): string {
+    return `ocal.filecache.v1|${this.mode}|${this.mode === 'external' ? this.folderId : this.root}`;
+  }
+
+  private readPersisted(): Record<string, PersistedFile> {
+    try {
+      const raw = localStorage.getItem(this.persistedKey());
+      if (!raw) return {};
+      const data = JSON.parse(raw) as { v?: number; files?: Record<string, PersistedFile> };
+      if (data?.v !== PERSISTED_CACHE_VERSION || !data.files || typeof data.files !== 'object') {
+        return {};
+      }
+      return data.files;
+    } catch {
+      return {};
+    }
+  }
+
+  private writePersisted(files: Record<string, PersistedFile>): void {
+    try {
+      localStorage.setItem(this.persistedKey(), JSON.stringify({ v: PERSISTED_CACHE_VERSION, files }));
+    } catch (err) {
+      // 配额不足等：仅告警，本次靠内存缓存，重启后回退全量读取
+      console.warn('持久化缓存写入失败：', err);
+    }
+  }
+
+  /** 启动时同步预热内存：首屏查询即时返回，后台增量刷新纠偏。 */
+  private hydrateFromPersistent(): void {
+    const entries = Object.values(this.readPersisted());
+    if (!entries.length) return;
+    this.cache = entries.map((f) => ({ item: f.item, archived: f.archived }));
+    this.cacheFingerprint = fingerprintEntries(this.cache);
   }
 
   /** 解析单个事项文件（桌面端 TryParseItemFile）。 */
@@ -592,9 +683,9 @@ class FolderStore {
   }
 
   /** 整体重读磁盘并更新缓存，返回数据是否发生变化（指纹比较）。 */
-  private async reloadCache(): Promise<boolean> {
+  private async reloadCache(force = false): Promise<boolean> {
     const gen = ++this.loadGen;
-    const entries = await this.loadAllFiles();
+    const entries = await this.loadAllFiles(force);
     // 已被更新的加载取代：丢弃本次结果，避免旧数据覆盖新缓存
     if (gen !== this.loadGen) return false;
     const fp = fingerprintEntries(entries);
@@ -604,26 +695,77 @@ class FolderStore {
     return changed;
   }
 
-  /** 全量扫描 items/ + archive/，事项正文并发读取（分片限流，避免 IPC 拥塞）。 */
-  private async loadAllFiles(): Promise<{ item: ScheduleEvent; archived: boolean }[]> {
+  /**
+   * 全量扫描 items/ + archive/。
+   * 持久化缓存命中（mtime+size 双相等且归档位置一致）时跳过正文读取；
+   * force=true（应用内写后、定期兜底）时全部重读正文。
+   */
+  private async loadAllFiles(force = false): Promise<{ item: ScheduleEvent; archived: boolean }[]> {
     const itemFiles = await this.listMd(this.itemsDir);
     const archiveDirs = await this.enumerateArchiveDirectories();
     const archivedLists = await Promise.all(archiveDirs.map((d) => this.listMd(d)));
-    const all: { path: string; name: string; archived: boolean }[] = [
+    const all: { path: string; name: string; archived: boolean; size?: number; mtimeMs?: number }[] = [
       ...itemFiles.map((f) => ({ ...f, archived: false })),
       ...archivedLists.flatMap((list) => list.map((f) => ({ ...f, archived: true }))),
     ];
+    const persisted = this.readPersisted();
     const out: { item: ScheduleEvent; archived: boolean }[] = [];
+    let dirty = false;
     const LIMIT = 24;
     for (let i = 0; i < all.length; i += LIMIT) {
-      const parsed = await Promise.all(
+      await Promise.all(
         all.slice(i, i + LIMIT).map(async (f) => {
+          // 元数据优先用列表自带的（SAF 免一次 IPC），缺失再逐文件 stat
+          let meta: { mtime: number; size: number } | null =
+            f.size != null && f.mtimeMs != null ? { size: f.size, mtime: f.mtimeMs } : null;
+          if (!meta) {
+            try {
+              meta = await this.adapter.stat(f.path);
+            } catch {
+              meta = null;
+            }
+          }
+          const prev = persisted[f.path];
+          if (
+            !force &&
+            prev &&
+            meta &&
+            prev.mtime === meta.mtime &&
+            prev.size === meta.size &&
+            prev.archived === f.archived
+          ) {
+            out.push({ item: prev.item, archived: f.archived });
+            return;
+          }
           const item = await this.parseItemFile(f.path, f.name);
-          return item ? { item, archived: f.archived } : null;
+          if (!item) {
+            if (persisted[f.path]) {
+              delete persisted[f.path];
+              dirty = true;
+            }
+            return;
+          }
+          out.push({ item, archived: f.archived });
+          if (meta) {
+            persisted[f.path] = { mtime: meta.mtime, size: meta.size, archived: f.archived, item };
+            dirty = true;
+          } else if (persisted[f.path]) {
+            // 无元数据可校验：删掉旧条目，避免下次误命中读脏
+            delete persisted[f.path];
+            dirty = true;
+          }
         }),
       );
-      for (const p of parsed) if (p) out.push(p);
     }
+    // 清理磁盘上已不存在的条目
+    const onDisk = new Set(all.map((f) => f.path));
+    for (const p of Object.keys(persisted)) {
+      if (!onDisk.has(p)) {
+        delete persisted[p];
+        dirty = true;
+      }
+    }
+    if (dirty) this.writePersisted(persisted);
     return out;
   }
 
@@ -633,18 +775,21 @@ class FolderStore {
     this.reloadTimer = setTimeout(() => void this.pollCheck(), 300);
   }
 
-  /** 应用内写操作：已知已变更，重读后直接通知视图（不等 watcher）。 */
+  /** 应用内写操作：已知已变更，强制重读正文后直接通知视图（不等 watcher）。 */
   private afterWrite(): void {
-    void this.reloadCache()
+    // force=true：同秒写入在粗粒度文件系统上 mtime 可能不变，必须重读
+    void this.reloadCache(true)
       .catch(() => undefined)
       .then(() => this.onItemsChanged?.());
   }
 
   /** 后台监视的一次检查：重读 + 指纹比对；无变化时只做过期归档检查。 */
   private async pollCheck(): Promise<void> {
+    // 每 10 次强制全读一次正文，兜底 mtime 被刻意保留的外部修改
+    const force = ++this.pollCount % 10 === 0;
     let changed = false;
     try {
-      changed = await this.reloadCache();
+      changed = await this.reloadCache(force);
     } catch {
       return;
     }
