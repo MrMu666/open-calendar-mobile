@@ -80,18 +80,21 @@ export default function App() {
   return (
     <div className={`app theme-${theme}`} style={style}>
       <main className="app-main">
-        {tab === 'calendar' && (
+        {/* keep-alive：三栏常驻挂载、仅显隐，切 Tab 不卸载；数据经 store 内存缓存共享，后台即热 */}
+        <div style={{ display: tab === 'calendar' ? '' : 'none' }}>
           <CalendarView
             refreshTick={refreshTick}
             accentColor={settings.accentColor}
             onEdit={(e) => openEditor(e)}
             onNew={() => openEditor(null)}
           />
-        )}
-        {tab === 'tasks' && (
+        </div>
+        <div style={{ display: tab === 'tasks' ? '' : 'none' }}>
           <TasksView refreshTick={refreshTick} onEdit={(e) => openEditor(e)} onNew={() => openEditor(null)} />
-        )}
-        {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} refreshTick={refreshTick} />}
+        </div>
+        <div style={{ display: tab === 'settings' ? '' : 'none' }}>
+          <SettingsView settings={settings} onChange={updateSettings} refreshTick={refreshTick} />
+        </div>
       </main>
 
       <TabBar tab={tab} onChange={setTab} />

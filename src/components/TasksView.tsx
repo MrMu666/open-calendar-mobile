@@ -38,7 +38,9 @@ export default function TasksView({ refreshTick, onEdit, onNew }: Props) {
         <span className="tasks-title">未到期事项</span>
       </div>
       <div className="tasks-list">
-        {loaded && items.length === 0 ? (
+        {!loaded ? (
+          <div className="empty-text">加载中…</div>
+        ) : items.length === 0 ? (
           <div className="empty-text">暂无未到期事项</div>
         ) : (
           items.map((e) => (
