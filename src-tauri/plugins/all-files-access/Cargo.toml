@@ -5,6 +5,7 @@ description = "Check and request Android all-files access (MANAGE_EXTERNAL_STORA
 edition = "2021"
 authors = ["open-calendar-mobile"]
 license = "MIT"
+links = "tauri-plugin-all-files-access"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
