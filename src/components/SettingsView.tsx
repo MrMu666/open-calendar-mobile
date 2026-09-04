@@ -225,6 +225,9 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
             实时监听启动失败，已降级为每 30 秒轮询刷新；应用内修改仍会即时显示。
           </p>
         )}
+        {store.getWatchStatus() !== 'watch' && store.getWatchError() && (
+          <p className="settings-note mono">监听失败原因：{store.getWatchError()}</p>
+        )}
       </div>
 
       {pickerOpen && (

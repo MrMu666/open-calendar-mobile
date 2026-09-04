@@ -272,6 +272,10 @@ class FolderStore {
 
   private mode: 'appData' | 'external' = 'appData';
   private adapter: StorageAdapter = appDataAdapter;
+  /** watch 用的实际路径：appData 为 null（走 itemsDir + baseDir），external 为绝对路径。 */
+  private absItemsDir: string | null = null;
+  /** 最近一次 watch 启动失败的原因（成功则为 null），供设置页诊断展示。 */
+  private watchError: string | null = null;
 
   /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：'' = 所选文件夹根）。 */
   private root = DEFAULT_ROOT;
@@ -308,6 +312,11 @@ class FolderStore {
     return this.unwatch ? 'watch' : 'poll';
   }
 
+  /** 最近一次 watch 启动失败的原因；null = 监听正常或尚未启动。 */
+  getWatchError(): string | null {
+    return this.watchError;
+  }
+
   /** 当前数据根目录（appData：相对 $APPDATA 的子目录；external：外部绝对路径）。 */
   getRoot(): string {
     return this.root;
@@ -318,6 +327,7 @@ class FolderStore {
     const cleaned = sanitizeRootPath(dataDir);
     this.mode = 'appData';
     this.adapter = appDataAdapter;
+    this.absItemsDir = null;
     this.root = cleaned;
     this.itemsDir = `${cleaned}/items`;
     this.archiveDir = `${cleaned}/archive`;
@@ -330,6 +340,7 @@ class FolderStore {
     const base = sanitizeExternalPath(absPath);
     this.mode = 'external';
     this.adapter = directFsAdapter(base);
+    this.absItemsDir = `${base}/items`;
     this.root = base;
     this.itemsDir = 'items';
     this.archiveDir = 'archive';
@@ -347,17 +358,26 @@ class FolderStore {
     await this.adapter.mkdir(this.deletedDir);
 
     // 独立后台监视：两种后端都走 fs 直接路径，notify watch 同级生效；
+    // 注意必须用绝对路径（adapter 内部拼接 base，watch 调用绕不过去）；
     // 监听失败时降级为轮询兜底。
     try {
-      this.unwatch = await watch(this.itemsDir, () => this.scheduleReload(), {
-        ...(this.mode === 'appData' ? { baseDir: BaseDirectory.AppData } : {}),
-        recursive: false,
-        delayMs: 300,
-      });
+      // external 用绝对路径（无 baseDir），appData 用相对路径 + baseDir
+      this.unwatch = this.absItemsDir
+        ? await watch(this.absItemsDir, () => this.scheduleReload(), {
+            recursive: false,
+            delayMs: 300,
+          })
+        : await watch(this.itemsDir, () => this.scheduleReload(), {
+            baseDir: BaseDirectory.AppData,
+            recursive: false,
+            delayMs: 300,
+          });
+      this.watchError = null;
     } catch (err) {
       // 某些 Android 文件系统上 notify 可能不可用：降级为轮询兜底
       console.warn('items 目录监听启动失败，降级为轮询刷新：', err);
       this.unwatch = null;
+      this.watchError = err instanceof Error ? err.message : String(err);
     }
 
     if (!this.unwatch) {
