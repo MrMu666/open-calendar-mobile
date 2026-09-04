@@ -181,6 +181,24 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
           日程移动端 · 桌面版「日程桌面」的移动端复刻。
         </p>
       </div>
+
+      <div className="settings-section">
+        <div className="settings-title">文件监视</div>
+        {store.getWatchStatus() === 'watch' ? (
+          <p className="settings-note">
+            实时监听已生效：事项目录变化会即时刷新。
+          </p>
+        ) : isExternal ? (
+          <p className="settings-note">
+            实时监听不可用：外部目录不支持文件监听，当前每 30
+            秒轮询一次刷新；应用内修改会即时显示。
+          </p>
+        ) : (
+          <p className="settings-note">
+            实时监听启动失败，已降级为每 30 秒轮询刷新；应用内修改仍会即时显示。
+          </p>
+        )}
+      </div>
     </div>
   );
 }
