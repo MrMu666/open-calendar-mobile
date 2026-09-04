@@ -6,7 +6,7 @@
 
 「日程移动端」：桌面端 [open-calendar-desktop](https://github.com/MrMu666/open-calendar-desktop)（WPF/.NET）的 **Android 移动端复刻**，用 Tauri 2 + React 19 + TypeScript + Vite 实现。全中文 UI，底部三栏导航：**日历 / 事项 / 设置**。
 
-- 日历月视图：6×7 网格、农历显示、事项圆点、选中日日程列表
+- 日历月视图：6×7 网格、农历显示、事项圆点（存在未到期事项=红，仅有已到期事项=绿，色值同事项卡片起止日期）、选中日日程列表
 - 事项列表：未到期事项、优先级/标签、展开详情、设为长期/已完成、删除
 - 编辑器：底部弹层，标题/开始/截止时间、标签、优先级、Markdown 内容
 - 设置：亮色/暗色主题切换（默认亮色）、强调色、自定义数据存储目录（桌面端的"开机自启/背景色/透明度"在移动端无对应项）
@@ -34,7 +34,7 @@ app-icon-fg.png / app-icon-bg.png  # 预处理生成的 Android 前景/背景层
 scripts/prepare-android-icon.mjs   # 生成上述前景/背景层（内容缩放居中，避免图标过大）
 sign/                        # Android 签名 keystore（敏感，.gitignore 排除，见 README.md）
 src/
-  main.tsx / App.tsx         # 应用外壳：三栏切换 + 编辑器弹层状态
+  main.tsx / App.tsx         # 应用外壳：三栏 keep-alive 常驻（仅显隐，切 Tab 不卸载）+ 编辑器弹层状态
   types.ts                   # ScheduleEvent / 视图类型（对齐桌面端 Models）
   lib/
     store.ts                 # FolderItemStore 移植：文件名解析/归档/删除/监听
@@ -71,9 +71,16 @@ src-tauri/
   `calendar/settings.json` 做一次性迁移读取）。
 - **查询边界**：事项列表只读 items/（未过期）；日历圆点/选中日日程同时读 items/+archive/，
   已完成事项仍显示在它开始的那天，可继续编辑/设为长期/删除（与桌面端 GetUpcoming 语义一致）。
-- **文件监听**：用 `@tauri-apps/plugin-fs` 的 `watch`（notify 后端，300ms 去抖，需 Rust 侧
-  `features=["watch"]` + 权限 `fs:allow-watch`）；监听失败时降级为 30s 轮询兜底。
-  应用内写操作直接 `notifyChanged()` 触发刷新，不等 watcher。
+  日历圆点颜色：该日存在未到期事项=红（`var(--red)`，同 `.item-end`）、仅有已到期事项=绿
+  （`var(--green)`，同 `.item-start`）、无事项隐藏；选中格圆点为白色（CSS 覆盖）。
+- **文件监听 + 内存缓存**：`store.ts` 的 FolderStore 单例拥有独立后台监视与内存缓存
+  （`cache`/`cacheFingerprint`/`loadGen`），三视图共享：`open()` 启动时全量预取一次
+  （事项正文 24 并发读），之后仅在监视到变动时整体重读；`getUpcoming/getItems/count`
+  只读内存。底层用 `@tauri-apps/plugin-fs` 的 `watch`（notify 后端，300ms 去抖，需 Rust 侧
+  `features=["watch"]` + 权限 `fs:allow-watch`）；监听失败时降级为 30s 轮询兜底
+  （`pollCheck()` 重读 + 指纹比对，无变化不通知视图，只做过期归档检查）。
+  应用内写操作走 `afterWrite()` 重读后通知，不等 watcher。监视状态经
+  `getWatchStatus()` 暴露，设置页底部"文件监视"区块据此提示（watch 生效 / SAF 轮询 / 降级轮询）。
 
 ### 版本号
 - **`package.json` 是版本唯一来源**；`tauri.conf.json` 的 `"version": "../package.json"` 引用它。
@@ -146,6 +153,8 @@ src-tauri/
 
 ## 约定与注意
 
+- **每次修改完代码后，检查是否有必要同步更新本文件（AGENTS.md）**：架构/约定/踩坑点
+  变了就改，保持摘要与代码一致；只改实现细节、无新约定时不改。
 - **本地 Git 分支约定**：仓库默认分支为 `main`（GitHub），本地初始化时默认 `master`；
   推送前统一改名为 `main`。workflow 监听 `main` 和 `master` 双分支，推送哪个都触发构建。
 - UI 文案、错误消息用中文；标识符用英文。
@@ -157,4 +166,4 @@ src-tauri/
   `watch()` 调用在 Rust 侧不存在，Android 运行时报错。
 - 改了 `capabilities/*.json` 后，若在支持的环境跑 `tauri dev/build` 会重新生成
   `gen/schemas`；`src-tauri/.gitignore` 已忽略 `gen/schemas`，不影响提交。
-- `.freebuff/` 未跟踪（本工具状态目录，勿提交）。
+- `.omo/` 未跟踪（本工具状态目录，勿提交）。
