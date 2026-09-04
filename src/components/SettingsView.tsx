@@ -4,7 +4,8 @@ import { appDataDir } from '@tauri-apps/api/path';
 import type { Theme, UserSettings } from '../lib/settings';
 import { ACCENT_PRESETS, DEFAULT_SETTINGS } from '../lib/settings';
 import { isAllFilesAccessGranted, openAllFilesAccessSettings } from '../lib/allFilesAccess';
-import { sanitizeExternalPath, store } from '../lib/store';
+import { store } from '../lib/store';
+import FolderPicker, { EXTERNAL_ROOT } from './FolderPicker';
 
 interface Props {
   settings: UserSettings;
@@ -17,7 +18,7 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
   const [appDir, setAppDir] = useState('');
   const [dirError, setDirError] = useState('');
   const [granted, setGranted] = useState<boolean | null>(null);
-  const [pathDraft, setPathDraft] = useState(settings.externalPath);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [version, setVersion] = useState('');
 
@@ -59,10 +60,17 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     };
   }, [refreshTick]);
 
-  // external 模式下输入框跟随已保存路径
-  useEffect(() => {
-    setPathDraft(settings.externalPath);
-  }, [settings.externalPath]);
+  /** 使用目录浏览器选定的外部绝对路径（选择器只产出合法路径，setExternalPath 再做可用性验证）。 */
+  const handlePick = async (absPath: string): Promise<void> => {
+    setDirError('');
+    setPickerOpen(false);
+    try {
+      await store.setExternalPath(absPath);
+      onChange({ storageMode: 'external', externalPath: absPath });
+    } catch (err) {
+      setDirError(err instanceof Error ? err.message : '切换目录失败。');
+    }
+  };
 
   /** 跳系统设置页开启所有文件访问权限。 */
   const handleOpenSettings = async (): Promise<void> => {
@@ -74,20 +82,14 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     }
   };
 
-  /** 使用输入的外部绝对路径（需先授权，路径不存在会自动创建 items/ 验证）。 */
-  const handleUsePath = async (): Promise<void> => {
+  /** 打开目录浏览器（需先授权）。 */
+  const handleOpenPicker = (): void => {
     setDirError('');
-    try {
-      const base = sanitizeExternalPath(pathDraft);
-      if (granted !== true) {
-        setDirError('请先开启所有文件访问权限。');
-        return;
-      }
-      await store.setExternalPath(base);
-      onChange({ storageMode: 'external', externalPath: base });
-    } catch (err) {
-      setDirError(err instanceof Error ? err.message : '切换目录失败。');
+    if (granted !== true) {
+      setDirError('请先开启所有文件访问权限。');
+      return;
     }
+    setPickerOpen(true);
   };
 
   /** 恢复默认：应用数据目录 / calendar。 */
@@ -172,31 +174,11 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
         )}
         <div className="setting-info">
           <span className="setting-label">外部目录</span>
-          <input
-            className="input mono"
-            inputMode="text"
-            placeholder="/storage/emulated/0/Download"
-            value={pathDraft}
-            onChange={(e) => setPathDraft(e.target.value)}
-          />
+          <span className="setting-value mono">{settings.externalPath || '（未设置）'}</span>
         </div>
         <div className="dir-row">
-          <button type="button" className="btn small primary" onClick={() => void handleUsePath()}>
-            使用该目录
-          </button>
-          <button
-            type="button"
-            className="btn small"
-            onClick={() => setPathDraft('/storage/emulated/0/Download')}
-          >
-            Download
-          </button>
-          <button
-            type="button"
-            className="btn small"
-            onClick={() => setPathDraft('/storage/emulated/0/Documents')}
-          >
-            Documents
+          <button type="button" className="btn small primary" onClick={handleOpenPicker}>
+            选择目录…
           </button>
           <button type="button" className="btn small" onClick={() => void handleReset()}>
             恢复默认
@@ -244,6 +226,14 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
           </p>
         )}
       </div>
+
+      {pickerOpen && (
+        <FolderPicker
+          initialPath={settings.externalPath || EXTERNAL_ROOT}
+          onPick={(p) => void handlePick(p)}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

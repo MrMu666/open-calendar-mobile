@@ -636,6 +636,47 @@ textarea {
   margin-top: 14px;
 }
 
+/* ── 目录浏览器 ───────────────────────────────────────── */
+
+.dir-path {
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.dir-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  max-height: 38dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dir-item {
+  display: flex;
+  align-items: center;
+  padding: 11px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.dir-item:active {
+  background: var(--hover-bg);
+}
+
+.new-folder-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.new-folder-row .input {
+  flex: 1;
+}
+
 /* ── 设置页 ───────────────────────────────────────────── */
 
 .settings-section {

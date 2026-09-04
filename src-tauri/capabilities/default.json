@@ -15,7 +15,7 @@
     "fs:allow-unwatch",
     {
       "identifier": "fs:scope",
-      "allow": ["/storage/emulated/0/**/*"]
+      "allow": ["/storage/emulated/0", "/storage/emulated/0/**/*"]
     }
   ]
 }
