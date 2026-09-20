@@ -134,6 +134,10 @@ export interface WidgetStatus {
   providerUpdateAt: number;
   /** 探针：provider 侧 onUpdate 收到的实例数。 */
   providerUpdateIds: number;
+  /** 是否有未处理的「+」新增请求（桌面点了 + 但应用还没消费）。 */
+  newItem: boolean;
+  /** 是否有未处理的「点击某条事项」请求。 */
+  pendingTap: boolean;
 }
 
 const EMPTY_STATUS: WidgetStatus = {
@@ -143,6 +147,8 @@ const EMPTY_STATUS: WidgetStatus = {
   lastError: '',
   providerUpdateAt: 0,
   providerUpdateIds: 0,
+  newItem: false,
+  pendingTap: false,
 };
 
 /** 推送快照到原生并立即重绘桌面；失败返回 null（无插件/桌面端）。 */

@@ -21,6 +21,9 @@ function describeWidgetStatus(status: WidgetStatus): string {
     );
   }
   if (status.lastError) parts.push(`渲染报错：${status.lastError}`);
+  // 待处理请求：可判断「+ / 点击」有没有写进去、应用有没有消费
+  if (status.newItem) parts.push('有未处理的「+」新增请求');
+  if (status.pendingTap) parts.push('有未处理的点击事项请求');
   return parts.join(' · ');
 }
 
@@ -41,6 +44,21 @@ export default function SettingsView({ settings, onChange, onStorePathChanged, r
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [version, setVersion] = useState('');
   const [widgetMsg, setWidgetMsg] = useState('');
+  /** 存储诊断：模式 / 根目录 / 内存缓存条数 / 磁盘条数（定位「切目录后列表为空」）。 */
+  const [storeDiag, setStoreDiag] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void store.debugSnapshot().then((s) => {
+      if (cancelled) return;
+      setStoreDiag(
+        `${s.mode === 'external' ? '外部目录' : '应用数据'} ${s.root}｜内存缓存 ${s.cacheCount < 0 ? '未建立' : `${s.cacheCount} 条`}｜磁盘 ${s.diskCount < 0 ? `读取失败(${s.diskError})` : `${s.diskCount} 条`}`,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshTick, settings.storageMode, settings.dataDir, settings.externalPath]);
 
   useEffect(() => {
     appDataDir()
@@ -245,6 +263,7 @@ export default function SettingsView({ settings, onChange, onStorePathChanged, r
           <span className="setting-label">未归档事项</span>
           <span className="setting-value">{itemCount === null ? '…' : itemCount} 条</span>
         </div>
+        {storeDiag && <p className="settings-note mono">存储状态：{storeDiag}</p>}
       </div>
 
       <div className="settings-section">

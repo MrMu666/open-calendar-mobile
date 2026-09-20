@@ -322,6 +322,40 @@ class FolderStore {
     return this.root;
   }
 
+  /** 内存缓存里的条目数（-1 = 缓存尚未建立）。 */
+  getCacheCount(): number {
+    return this.cache ? this.cache.length : -1;
+  }
+
+  /**
+   * 诊断快照：设置页用它定位「切了目录但列表为空」这类问题。
+   * diskCount 直接扫一遍 items/，可与内存缓存对比出是「没读盘」还是「没通知视图」。
+   */
+  async debugSnapshot(): Promise<{
+    mode: 'appData' | 'external';
+    root: string;
+    cacheCount: number;
+    diskCount: number;
+    diskError: string;
+  }> {
+    let diskCount = -1;
+    let diskError = '';
+    try {
+      // itemsDir 在两种后端下都是「相对当前根」的路径，listMd 走 adapter 拼 base
+      const files = await this.listMd(this.itemsDir);
+      diskCount = files.length;
+    } catch (err) {
+      diskError = err instanceof Error ? err.message : String(err);
+    }
+    return {
+      mode: this.mode,
+      root: this.root,
+      cacheCount: this.getCacheCount(),
+      diskCount,
+      diskError,
+    };
+  }
+
   /** 切换为 appData 模式：数据根目录为 $APPDATA 下的任意子目录。 */
   async setRoot(dataDir: string): Promise<void> {
     const cleaned = sanitizeRootPath(dataDir);
@@ -382,10 +416,21 @@ class FolderStore {
     this.onChange?.();
     // 启动时先同步用持久化缓存预热内存（首屏即时），再后台按 mtime/size 增量刷新
     this.hydrateFromPersistent();
-    // 启动时全量预取一次并共享给所有视图；之后仅在监视到变动时重读
-    void this.reloadCache()
-      .catch(() => undefined)
-      .then(() => this.onItemsChanged?.());
+    // 启动/切换目录时全量预取一次并共享给所有视图；之后仅在监视到变动时重读。
+    //
+    // 注意（已踩坑）：这里必须用 finally 而不是 then ——
+    // 原写法 `.catch(() => undefined).then(() => onItemsChanged())` 在首次扫描抛错时
+    // （外部目录权限/时序问题）会让 onItemsChanged **永不触发**，视图一直停在空列表，
+    // 表现为「选了目录还得再选一次才显示事项」。
+    // 同时这一轮扫描要在 open() 内 await 完成，保证设置页切目录返回时内存缓存已就绪，
+    // 视图首次渲染就能拿到数据。
+    try {
+      await this.reloadCache();
+    } catch (err) {
+      console.warn('首次读取数据目录失败（仍会通知视图重试）：', err);
+    } finally {
+      this.onItemsChanged?.();
+    }
   }
 
   /** 停止目录监听与轮询（切换根目录前调用）。 */

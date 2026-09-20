@@ -157,8 +157,9 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         // 探针：provider（launcher 进程）是否被系统拉起过，用于区分「没跑」与「跑了但渲染失败」
         out.put("providerUpdateAt", WidgetPrefs.lastProviderUpdateAt(context))
         out.put("providerUpdateIds", WidgetPrefs.lastProviderUpdateIds(context))
-        // 只读展示：是否有待处理的「+」新增请求
+        // 只读展示：是否有待处理的「+」新增请求 / 点击某条事项的请求
         out.put("newItem", WidgetPrefs.hasNewItemRequest(context))
+        out.put("pendingTap", WidgetPrefs.getPendingTap(context, false) != null)
         return out
     }
 }
