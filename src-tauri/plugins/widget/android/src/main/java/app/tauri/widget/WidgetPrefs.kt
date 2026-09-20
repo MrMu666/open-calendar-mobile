@@ -22,6 +22,8 @@ object WidgetPrefs {
     /** 应用正在刷新（小组件显示进度圈）标记。 */
     private const val KEY_SYNCING = "syncing"
     private const val KEY_SYNCING_AT = "syncing_at"
+    /** 最近一次渲染失败原因（空 = 正常），设置页据此诊断小组件空白问题。 */
+    private const val KEY_LAST_ERROR = "last_error"
 
     /** 同步标记最长有效期：超时后桌面不再显示进度圈。 */
     private const val SYNC_TIMEOUT_MS = 20_000L
@@ -47,7 +49,9 @@ object WidgetPrefs {
         val theme: String,
         val accent: String,
         val truncated: Boolean,
-        val updatedAt: Long
+        val updatedAt: Long,
+        /** 上一次渲染失败原因（由渲染侧回写；非空时小组件会把它显示出来）。 */
+        val lastError: String = ""
     )
 
     fun prefs(context: Context): SharedPreferences =
@@ -145,7 +149,9 @@ object WidgetPrefs {
                 theme = if (root.optString("theme", "light") == "dark") "dark" else "light",
                 accent = root.optString("accentColor", "").ifEmpty { "#4CAF50" },
                 truncated = root.optBoolean("truncated", false),
-                updatedAt = root.optLong("updatedAt", 0L)
+                updatedAt = root.optLong("updatedAt", 0L),
+                // 渲染侧失败原因写在这里，让小组件自己就能把它显示出来
+                lastError = prefs(context).getString(KEY_LAST_ERROR, "") ?: ""
             )
         } catch (e: Exception) {
             emptyPayload()
@@ -205,6 +211,20 @@ object WidgetPrefs {
     fun clearPendingTap(context: Context) {
         prefs(context).edit().remove(KEY_PENDING).remove(KEY_PENDING_AT).apply()
     }
+
+    /**
+     * 记录/清除最近一次渲染失败原因。
+     * launcher 进程里的异常会被系统吞掉（小组件只剩空白），所以必须自己留痕，
+     * 由设置页读取展示，否则线上完全无法定位。
+     */
+    fun setLastError(context: Context, message: String?) {
+        prefs(context).edit().putString(KEY_LAST_ERROR, message ?: "").apply()
+    }
+
+    fun getLastError(context: Context): String = prefs(context).getString(KEY_LAST_ERROR, "") ?: ""
+
+    /** 已落盘快照的条目数（诊断用）。 */
+    fun itemCount(context: Context): Int = load(context).items.size
 
     const val DEFAULT_LIMIT = 8
     const val MIN_LIMIT = 4

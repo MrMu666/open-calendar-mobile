@@ -8,6 +8,8 @@ import {
   takePendingTapId,
   clearPendingTapId,
   widgetItemId,
+  widgetStatus,
+  type WidgetStatus,
   WIDGET_DEFAULT_LIMIT,
 } from './widget';
 
@@ -59,11 +61,11 @@ export async function syncWidget(force = false): Promise<boolean> {
         widgetLimit: limit,
       });
       if (!force && fp === lastFingerprint) return false;
-      const ok = await pushWidget(
+      const status = await pushWidget(
         buildWidgetPayload(items, limit, settings.theme, settings.accentColor, items.length),
       );
-      if (ok) lastFingerprint = fp;
-      return ok;
+      if (status) lastFingerprint = fp;
+      return status !== null;
     } catch {
       return false;
     }
@@ -75,11 +77,13 @@ export async function syncWidget(force = false): Promise<boolean> {
   }
 }
 
-/** 设置页“立即刷新”：先让桌面显示同步中，再强制推送。 */
-export async function forceRefreshWidget(): Promise<void> {
+/** 设置页“立即推送数据”：先让桌面显示同步中，再强制推送，返回原生侧状态供诊断展示。 */
+export async function forceRefreshWidget(): Promise<WidgetStatus | null> {
   await refreshWidget();
   lastFingerprint = '';
-  await syncWidget(true);
+  const pushed = await syncWidget(true);
+  if (!pushed) return null;
+  return widgetStatus();
 }
 
 /** 指纹失效（切换数据目录等），下次 sync 必定重新推送。 */

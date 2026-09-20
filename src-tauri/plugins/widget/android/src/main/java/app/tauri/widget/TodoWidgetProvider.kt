@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.StrikethroughSpan
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import java.text.SimpleDateFormat
@@ -38,9 +39,10 @@ class TodoWidgetProvider : AppWidgetProvider() {
     ) {
         for (id in appWidgetIds) {
             try {
-                appWidgetManager.updateAppWidget(id, buildViews(context, id))
+                appWidgetManager.updateAppWidget(id, buildViewsSafe(context, id))
             } catch (e: Exception) {
                 // 单个实例失败不影响其它实例
+                recordError(context, e)
             }
         }
     }
@@ -89,6 +91,8 @@ class TodoWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
+        private const val TAG = "OpenCalendarWidget"
+
         /** 点击单条事项的广播 action（由 Kotlin 侧 PendingIntent 发出）。 */
         const val ACTION_OPEN_ITEM = "app.tauri.widget.ACTION_OPEN_ITEM"
 
@@ -99,6 +103,32 @@ class TodoWidgetProvider : AppWidgetProvider() {
 
         private const val META_MAX_CHARS = 14
         private const val TITLE_MAX_CHARS = 22
+
+        /**
+         * 渲染并捕获异常：launcher 进程里的崩溃会被系统静默吞掉（桌面只剩空白框架），
+         * 所以这里必须把原因写进 SharedPreferences，供设置页展示诊断。
+         */
+        fun buildViewsSafe(context: Context, appWidgetId: Int): RemoteViews? {
+            return try {
+                val views = buildViews(context, appWidgetId)
+                WidgetPrefs.setLastError(context, null)
+                views
+            } catch (e: Throwable) {
+                recordError(context, e)
+                null
+            }
+        }
+
+        /** 记录渲染失败原因（带上类名，便于区分是哪个 RemoteViews 动作不支持）。 */
+        fun recordError(context: Context, e: Throwable) {
+            val message = "${e.javaClass.simpleName}: ${e.message ?: "(无消息)"}"
+            Log.e(TAG, "小组件渲染失败", e)
+            try {
+                WidgetPrefs.setLastError(context, message)
+            } catch (ignored: Exception) {
+                // 连错误都写不进去时只能靠 logcat
+            }
+        }
 
         /** 渲染一个小组件实例（也供 [WidgetBridge] 主动刷新使用）。 */
         fun buildViews(context: Context, appWidgetId: Int): RemoteViews {
@@ -120,7 +150,13 @@ class TodoWidgetProvider : AppWidgetProvider() {
             views.setInt(R.id.widget_date, "setTextColor", subColor)
             views.setInt(R.id.widget_footer, "setTextColor", subColor)
             views.setInt(R.id.widget_empty_text, "setTextColor", subColor)
-            views.setInt(R.id.widget_progress, "setColorFilter", accent)
+            // 进度圈染色是可选项：RemoteViews 若不支持 ImageView#setColorFilter，
+            // 这里会抛 ActionException。包起来，宁可进度圈用默认色也不要整个小组件空白。
+            try {
+                views.setInt(R.id.widget_progress, "setColorFilter", accent)
+            } catch (e: Exception) {
+                Log.w(TAG, "进度圈染色失败，使用默认颜色", e)
+            }
 
             val now = System.currentTimeMillis()
             views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_name))
@@ -133,10 +169,21 @@ class TodoWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_count, "")
                 views.setViewVisibility(R.id.widget_items, View.GONE)
                 views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
-                val syncing = WidgetPrefs.isSyncing(context)
+                // 渲染过报错时把原因直接显示在小组件上（launcher 进程的异常系统会吞，
+                // 用户没有 logcat，只能这样自曝原因）
+                val error = payload.lastError
+                val syncing = error.isEmpty() && WidgetPrefs.isSyncing(context)
                 views.setViewVisibility(R.id.widget_progress, if (syncing) View.VISIBLE else View.GONE)
                 views.setViewVisibility(R.id.widget_empty_text, if (syncing) View.GONE else View.VISIBLE)
-                views.setTextViewText(R.id.widget_empty_text, context.getString(R.string.widget_empty))
+                views.setTextViewText(
+                    R.id.widget_empty_text,
+                    if (error.isNotEmpty()) "渲染错误：$error" else context.getString(R.string.widget_empty)
+                )
+                views.setInt(
+                    R.id.widget_empty_text,
+                    "setTextColor",
+                    if (error.isNotEmpty()) color(context, R.color.widget_phase_active) else subColor
+                )
             } else {
                 views.setViewVisibility(R.id.widget_items, View.VISIBLE)
                 views.setViewVisibility(R.id.widget_empty, View.GONE)
@@ -209,7 +256,18 @@ class TodoWidgetProvider : AppWidgetProvider() {
             } else {
                 item.title
             }
-            row.setTextViewText(R.id.widget_item_title, if (done) strike(title) else title)
+            // 删除线同样是可选效果（跨进程传 Spannable 极端情况下会失败）：失败则退化为纯文本
+            val titleText: CharSequence = if (done) {
+                try {
+                    strike(title)
+                } catch (e: Exception) {
+                    Log.w(TAG, "删除线渲染失败，退化为纯文本", e)
+                    title
+                }
+            } else {
+                title
+            }
+            row.setTextViewText(R.id.widget_item_title, titleText)
             row.setInt(R.id.widget_item_title, "setTextColor", if (done) subColor else textColor)
 
             val metaText = if (item.longTerm) {

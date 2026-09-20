@@ -87,9 +87,11 @@ object WidgetBridge {
         val ids = mgr.getAppWidgetIds(ComponentName(context, TodoWidgetProvider::class.java))
         for (id in ids) {
             try {
-                mgr.updateAppWidget(id, TodoWidgetProvider.buildViews(context, id))
+                val views = TodoWidgetProvider.buildViewsSafe(context, id) ?: continue
+                mgr.updateAppWidget(id, views)
             } catch (e: Exception) {
                 Log.w(TAG, "刷新小组件失败（id=$id）", e)
+                TodoWidgetProvider.recordError(context, e)
             }
         }
     }

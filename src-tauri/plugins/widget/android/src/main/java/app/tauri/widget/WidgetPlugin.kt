@@ -125,12 +125,19 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    /**
+     * 附带诊断信息：小组件实例数、已落盘条目数、最近一次渲染失败原因。
+     * launcher 进程里的渲染异常会被系统吞掉（桌面只剩空白框架），只能这样回传出来定位。
+     */
     private fun result(): JSObject {
-        val mgr = AppWidgetManager.getInstance(activity.applicationContext)
+        val context = activity.applicationContext
+        val mgr = AppWidgetManager.getInstance(context)
         val ids = mgr?.getAppWidgetIds(ComponentName(activity, TodoWidgetProvider::class.java))
         val out = JSObject()
         out.put("count", ids?.size ?: 0)
         out.put("attached", WidgetBridge.isAttached())
+        out.put("items", WidgetPrefs.itemCount(context))
+        out.put("lastError", WidgetPrefs.getLastError(context))
         return out
     }
 }

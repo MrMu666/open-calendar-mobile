@@ -117,23 +117,49 @@ export function buildWidgetPayload(
   };
 }
 
-/** 推送快照到原生并立即重绘桌面；失败静默（无插件/桌面端）。 */
-export async function pushWidget(payload: WidgetPayload): Promise<boolean> {
+/** 原生侧回传的小组件状态（诊断用：launcher 进程里的渲染异常只能这样回传）。 */
+export interface WidgetStatus {
+  /** 桌面上当前的小组件实例数。 */
+  count: number;
+  /** 插件实例是否已挂上（false 说明原生插件未加载）。 */
+  attached: boolean;
+  /** 已落盘快照里的条目数。 */
+  items: number;
+  /** 最近一次渲染失败原因；空串 = 正常。 */
+  lastError: string;
+}
+
+const EMPTY_STATUS: WidgetStatus = { count: 0, attached: false, items: 0, lastError: '' };
+
+/** 推送快照到原生并立即重绘桌面；失败返回 null（无插件/桌面端）。 */
+export async function pushWidget(payload: WidgetPayload): Promise<WidgetStatus | null> {
   try {
-    await invoke(`${PLUGIN}|update`, { payload: JSON.stringify(payload) });
-    return true;
+    const r = await invoke<Partial<WidgetStatus>>(`${PLUGIN}|update`, {
+      payload: JSON.stringify(payload),
+    });
+    return { ...EMPTY_STATUS, ...r };
   } catch {
-    return false;
+    return null;
   }
 }
 
-/** 标记“正在同步”并重绘（列表为空时桌面显示进度圈），返回当前小组件实例数。 */
-export async function refreshWidget(): Promise<number> {
+/** 标记“正在同步”并重绘（列表为空时桌面显示进度圈），返回原生侧状态。 */
+export async function refreshWidget(): Promise<WidgetStatus | null> {
   try {
-    const r = await invoke<{ count?: number }>(`${PLUGIN}|refresh`);
-    return r?.count ?? 0;
+    const r = await invoke<Partial<WidgetStatus>>(`${PLUGIN}|refresh`);
+    return { ...EMPTY_STATUS, ...r };
   } catch {
-    return 0;
+    return null;
+  }
+}
+
+/** 读取当前状态（不触发重绘；无插件时返回 null）。 */
+export async function widgetStatus(): Promise<WidgetStatus | null> {
+  try {
+    const r = await invoke<Partial<WidgetStatus>>(`${PLUGIN}|pendingTap`, { clear: false });
+    return { ...EMPTY_STATUS, ...r };
+  } catch {
+    return null;
   }
 }
 

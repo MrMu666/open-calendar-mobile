@@ -5,9 +5,16 @@ import type { Theme, UserSettings } from '../lib/settings';
 import { ACCENT_PRESETS, DEFAULT_SETTINGS } from '../lib/settings';
 import { isAllFilesAccessGranted, openAllFilesAccessSettings } from '../lib/allFilesAccess';
 import { store } from '../lib/store';
-import { WIDGET_LIMIT_OPTIONS } from '../lib/widget';
+import { WIDGET_LIMIT_OPTIONS, widgetStatus, type WidgetStatus } from '../lib/widget';
 import { forceRefreshWidget } from '../lib/widgetSync';
 import FolderPicker, { EXTERNAL_ROOT } from './FolderPicker';
+
+/** 把原生侧状态转成给用户看的一行诊断文本。 */
+function describeWidgetStatus(status: WidgetStatus): string {
+  const parts = [`桌面小组件 ${status.count} 个`, `已推送 ${status.items} 条`];
+  if (status.lastError) parts.push(`渲染报错：${status.lastError}`);
+  return parts.join(' · ');
+}
 
 interface Props {
   settings: UserSettings;
@@ -110,16 +117,32 @@ export default function SettingsView({ settings, onChange, onStorePathChanged, r
     }
   };
 
-  /** 立即把当前数据与外观推给桌面小组件（强制，忽略指纹）。 */
+  /** 立即把当前数据与外观推给桌面小组件（强制，忽略指纹），并回显状态供诊断。 */
   const handleWidgetRefresh = async (): Promise<void> => {
-    setWidgetMsg('刷新中…');
+    setWidgetMsg('推送中…');
     try {
-      await forceRefreshWidget();
-      setWidgetMsg(`已推送 ${itemCount ?? 0} 条事项`);
-    } catch {
-      setWidgetMsg('推送失败（桌面端 / 开发环境无此能力）');
+      const status = await forceRefreshWidget();
+      if (!status) {
+        setWidgetMsg('推送失败：当前环境没有桌面小组件插件（桌面端 / 开发环境）');
+        return;
+      }
+      setWidgetMsg(describeWidgetStatus(status));
+    } catch (err) {
+      setWidgetMsg(err instanceof Error ? err.message : '推送失败。');
     }
   };
+
+  // 进入设置页 / 数据变化后刷新一次小组件状态（含渲染报错，用于排查桌面空白）
+  useEffect(() => {
+    let cancelled = false;
+    void widgetStatus().then((s) => {
+      if (cancelled || !s) return;
+      setWidgetMsg(describeWidgetStatus(s));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshTick]);
 
   const isExternal = settings.storageMode === 'external';
 

@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 半透明样式：卡片/行/徽标全部带 alpha，桌面壁纸透出（不使用模糊，兼容 minSdk 24）。 -->
 <resources>
-    <!-- 暗色（跟随系统深色模式） -->
+    <!-- 暗色（跟随系统深色模式）：卡片 alpha 71%（#B3），行再叠一层 12% 白 -->
     <color name="widget_card_dark">#B31B2029</color>
-    <color name="widget_card_border_dark">#2EFFFFFF</color>
-    <color name="widget_row_dark">#14FFFFFF</color>
-    <color name="widget_row_border_dark">#1FFFFFFF</color>
-    <color name="widget_badge_dark">#24FFFFFF</color>
+    <color name="widget_card_border_dark">#33FFFFFF</color>
+    <color name="widget_row_dark">#1FFFFFFF</color>
+    <color name="widget_row_border_dark">#24FFFFFF</color>
+    <color name="widget_badge_dark">#2EFFFFFF</color>
     <color name="widget_text_dark">#F2FFFFFF</color>
-    <color name="widget_subtext_dark">#8CFFFFFF</color>
-    <color name="widget_divider_dark">#1FFFFFFF</color>
+    <color name="widget_subtext_dark">#99FFFFFF</color>
+    <color name="widget_divider_dark">#24FFFFFF</color>
 
-    <!-- 亮色（浅色壁纸/亮色主题） -->
-    <color name="widget_card_light">#B8FFFFFF</color>
-    <color name="widget_card_border_light">#24000000</color>
-    <color name="widget_row_light">#0A000000</color>
-    <color name="widget_row_border_light">#14000000</color>
-    <color name="widget_badge_light">#1A000000</color>
+    <!-- 亮色：卡片 alpha 71%（#B3）带冷灰，纯白壁纸下也能看出“玻璃感”而不是一块白板 -->
+    <color name="widget_card_light">#B3F2F4F8</color>
+    <color name="widget_card_border_light">#33000000</color>
+    <color name="widget_row_light">#14000000</color>
+    <color name="widget_row_border_light">#1F000000</color>
+    <color name="widget_badge_light">#1F000000</color>
     <color name="widget_text_light">#F21F2430</color>
     <color name="widget_subtext_light">#992F3542</color>
-    <color name="widget_divider_light">#14000000</color>
+    <color name="widget_divider_light">#1F000000</color>
 
     <!-- 状态标记：未到期=红（同事项卡片截止日期）、已到期=绿（同开始日期） -->
     <color name="widget_phase_active">#EF4444</color>
