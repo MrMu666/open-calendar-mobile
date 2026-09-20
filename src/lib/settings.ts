@@ -1,6 +1,6 @@
 import { BaseDirectory, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { sanitizeRootPath } from './store';
-import { WIDGET_DEFAULT_LIMIT } from './widget';
+import { WIDGET_DEFAULT_LIMIT, WIDGET_MAX_LIMIT, WIDGET_MIN_LIMIT } from './widget';
 
 /**
  * 应用设置：对应桌面端 UserSettings（外观部分 + 数据目录）。
@@ -60,7 +60,12 @@ export async function loadSettings(): Promise<UserSettings> {
           dataDir = DEFAULT_SETTINGS.dataDir;
         }
       }
-      return { ...DEFAULT_SETTINGS, ...parsed, dataDir };
+      // 小组件条数容错：手改 settings.json / 旧版本缺字段时回到安全区间
+      const limit = Number(parsed.widgetLimit);
+      const widgetLimit = Number.isFinite(limit)
+        ? Math.min(Math.max(Math.round(limit), WIDGET_MIN_LIMIT), WIDGET_MAX_LIMIT)
+        : DEFAULT_SETTINGS.widgetLimit;
+      return { ...DEFAULT_SETTINGS, ...parsed, dataDir, widgetLimit };
     } catch {
       // 继续尝试下一个位置
     }

@@ -184,4 +184,7 @@ export async function listenWidgetResync(handler: () => void): Promise<UnlistenF
 }
 
 export const WIDGET_DEFAULT_LIMIT = 8;
+/** 与 Kotlin WidgetPrefs 的 MIN_LIMIT / MAX_LIMIT 保持一致（4~12 条）。 */
+export const WIDGET_MIN_LIMIT = 4;
+export const WIDGET_MAX_LIMIT = 12;
 export const WIDGET_LIMIT_OPTIONS = [6, 8, 10, 12] as const;
