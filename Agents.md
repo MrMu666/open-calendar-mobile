@@ -149,6 +149,12 @@ src-tauri/
   - **带点号的 style 名会隐式继承**：`Widget.Todo.Badge` 默认继承 `Widget.Todo`，
     父样式不存在就报 `AAPT: error: resource style/Widget.Todo not found` 并中断构建
     —— 这类 style 必须显式写 `parent=""`（已踩坑，见 `res/values/styles.xml`）。
+  - **插件 android 模块必须自己声明 androidx 依赖**：`tauri-android` 用
+    `implementation("androidx.appcompat:appcompat:1.6.0")` / `core-ktx`，而
+    `implementation` 不传递，覆写 `onDestroy(activity: AppCompatActivity)` 这类签名会在
+    `:tauri-plugin-widget:compileReleaseKotlin` 报 `Unresolved reference: appcompat`
+    —— 已在插件 `build.gradle.kts` 声明同版本；能不用 androidx 就别用（取色改用
+    API 23+ 的 `Context.getColor`，故不再需要 core-ktx）。
 - CI 基础设施：`android-actions/setup-android@v3` 在 2026-09 起的 runner 镜像上会执行
   `sdkmanager tools`（该包已从 SDK 仓库下线）→ 退出码 1 直接打死 job；**已改为直接用
   runner 自带 SDK**（定位 `cmdline-tools/*/bin` 写入 PATH/ANDROID_HOME 并断言
