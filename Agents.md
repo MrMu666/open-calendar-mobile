@@ -125,7 +125,7 @@ src-tauri/
   按 Android `70*n-30` 公式）；显示条数 4~12 可调（设置页，默认 8），多出的在底部显示
   「+N 项待办」。半透明用带 alpha 的 `shape` 圆角 drawable（不用模糊，兼容 minSdk 24），
   暗/亮两套资源随设置的 `theme` 切换，强调色由 `accentColor` 经 `setTextColor` 下发。
-- 刷新时机：应用内数据/设置变化（`syncWidget` 指纹去重）、冷启动与 `onResume`
+- 刷新时机：应用内数据/设置变化（`syncWidget` 指纹去重）、冷启动 + `load()`/`onResume()`
   （原生发 `widget://resync` 让前端重推）、系统 `updatePeriodMillis`（30 分钟，兜底重算相对时间）。
   相对时间（今天/明天/M月d日）在 Kotlin 侧按当前时间计算，文案在 `strings.xml`。
 - 踩坑预防：`PendingIntent` 必须带 `FLAG_IMMUTABLE`（API 31+ 强制）；
@@ -134,6 +134,18 @@ src-tauri/
   所以事项行由 `addView` 动态填充而不是列表适配器；库的资源名统一 `widget_` 前缀
   避免与应用/模板（模板只有 `app_name`/`main_activity_title`）冲突；
   `consumer-rules.pro` 必须 keep 住 `app.tauri.widget.**`，否则 release 混淆后桌面加载 Provider 失败。
+- **Tauri Kotlin API 版本敏感点（改这块前先看 `~/.cargo/registry/.../tauri-<ver>/mobile/android/...` 源码）**：
+  - `Plugin` 只有**无参** `onPause()` / `onResume()`（`onDestroy`/`onRestart` 才带
+    `AppCompatActivity` 参数）——写成 `override fun onResume(activity: AppCompatActivity)`
+    会直接编译失败。当前前台可见性靠这两个回调维护（`WidgetBridge.foreground`）。
+  - 新建 widget 代码**不访问** `Plugin` 的 `activity` 字段（`abstract class Plugin(private val activity: Activity)`，
+    构造属性为 private）：Context 由插件构造时经 `WidgetBridge.attach(this, activity.applicationContext)` 传入。
+    （仓库既有的 `all-files-access` 插件直接用了 `activity`，且其类确实编进了 v0.1.16 的 APK，
+    说明那条路径可用；新代码不依赖这个歧义点。）
+  - `Plugin` 没有 `getActivity()`；跨插件取 Activity 用公开的 `PluginManager.activity`（`AppCompatActivity`）。
+  - 权限标识符不做 camelCase→kebab 转换（同一条命令名只把 `_` 换成 `-`）：
+    `pendingTap` 的权限是 `allow-pendingTap`，写成 `allow-pending-tap` 会让
+    `widget:default` 解析失败 → **Rust 侧 ACL 解析 panic（所有目标都挂）**。
 
 ### 版本号
 - **`package.json` 是版本唯一来源**；`tauri.conf.json` 的 `"version": "../package.json"` 引用它。
