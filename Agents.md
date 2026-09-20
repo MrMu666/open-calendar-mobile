@@ -146,6 +146,13 @@ src-tauri/
   - 权限标识符不做 camelCase→kebab 转换（同一条命令名只把 `_` 换成 `-`）：
     `pendingTap` 的权限是 `allow-pendingTap`，写成 `allow-pending-tap` 会让
     `widget:default` 解析失败 → **Rust 侧 ACL 解析 panic（所有目标都挂）**。
+  - **带点号的 style 名会隐式继承**：`Widget.Todo.Badge` 默认继承 `Widget.Todo`，
+    父样式不存在就报 `AAPT: error: resource style/Widget.Todo not found` 并中断构建
+    —— 这类 style 必须显式写 `parent=""`（已踩坑，见 `res/values/styles.xml`）。
+- CI 基础设施：`android-actions/setup-android@v3` 在 2026-09 起的 runner 镜像上会执行
+  `sdkmanager tools`（该包已从 SDK 仓库下线）→ 退出码 1 直接打死 job；**已改为直接用
+  runner 自带 SDK**（定位 `cmdline-tools/*/bin` 写入 PATH/ANDROID_HOME 并断言
+  java+sdkmanager 就绪），改 workflow 时不要把这一步换回那个 action。
 
 ### 版本号
 - **`package.json` 是版本唯一来源**；`tauri.conf.json` 的 `"version": "../package.json"` 引用它。
