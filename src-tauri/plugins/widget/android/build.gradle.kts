@@ -24,4 +24,11 @@ android {
 
 dependencies {
     implementation(project(":tauri-android"))
+    // tauri-android 用 implementation 引入 androidx，不会传递到本模块，必须自己声明：
+    //  - appcompat：onDestroy(activity: AppCompatActivity) 的覆写签名需要它
+    //  - core-ktx：本模块当前未直接使用（取色用 API 23+ 的 Context.getColor），
+    //    保留以便后续使用 androidx 工具方法
+    // 版本与 tauri-android 2.11.5 保持一致（1.6.0 / 1.7.0），避免依赖重复解析
+    implementation("androidx.appcompat:appcompat:1.6.0")
+    implementation("androidx.core:core-ktx:1.7.0")
 }

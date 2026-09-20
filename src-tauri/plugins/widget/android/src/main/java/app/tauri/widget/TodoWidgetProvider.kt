@@ -12,7 +12,6 @@ import android.text.Spanned
 import android.text.style.StrikethroughSpan
 import android.view.View
 import android.widget.RemoteViews
-import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -237,7 +236,8 @@ class TodoWidgetProvider : AppWidgetProvider() {
         private fun pendingFlags(): Int =
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
-        private fun color(context: Context, resId: Int): Int = ContextCompat.getColor(context, resId)
+        /** 取色：Context.getColor 自 API 23 起可用（minSdk 24），无需 androidx 依赖。 */
+        private fun color(context: Context, resId: Int): Int = context.getColor(resId)
 
         /** 已到期事项标题加删除线（RemoteViews 只能传 CharSequence，用 Spannable 实现）。 */
         private fun strike(text: String): CharSequence {
