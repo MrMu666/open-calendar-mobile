@@ -11,6 +11,7 @@
 - 编辑器：底部弹层，标题/开始/截止时间、标签、优先级、Markdown 内容
 - 设置：亮色/暗色主题切换（默认亮色）、强调色、自定义数据存储目录（appData 子目录 或
   外部绝对路径，后者需 Android 所有文件访问权限；桌面端的"开机自启/背景色/透明度"在移动端无对应项）
+- 安卓桌面小组件：3×4 半透明待办卡片（原生 RemoteViews），点击某条直接打开对应事项
 
 ## 技术栈
 
@@ -28,7 +29,7 @@ scripts/
   bump-version.mjs           # CI 版本递增（同步 package.json / tauri.conf.json）
   inject-android-signing.py  # CI 签名注入（init 后改写 build.gradle.kts）
 .github/workflows/
-  build-android.yml          # 推送触发：bump 版本 → init → 诊断插件接线 → 签名 → 构建分架构 APK → 断言 MANAGE 权限合并 → 发 Release
+  build-android.yml          # 推送触发：bump 版本 → init → 诊断插件接线 → 签名 → 构建分架构 APK → 断言 MANAGE 权限/小组件 receiver 合并 → 发 Release
 app-icon.png                 # 图标源图（桌面端 Assets/app-256.png 的副本）
 app-icon.json                # tauri icon manifest：android_fg/android_bg/缩放/背景色
 app-icon-fg.png / app-icon-bg.png  # 预处理生成的 Android 前景/背景层（勿手改）
@@ -36,10 +37,13 @@ scripts/prepare-android-icon.mjs   # 生成上述前景/背景层（内容缩放
 sign/                        # Android 签名 keystore（敏感，.gitignore 排除，见 README.md）
 src/
   main.tsx / App.tsx         # 应用外壳：三栏 keep-alive 常驻（仅显隐，切 Tab 不卸载）+ 编辑器弹层状态
+                             # 并负责桌面小组件接线：数据变化/设置变化推送、点击事件打开事项
   types.ts                   # ScheduleEvent / 视图类型（对齐桌面端 Models）
   lib/
     store.ts                 # FolderItemStore 移植：文件名解析/归档/删除/监听
     allFilesAccess.ts        # 所有文件访问授权桥（invoke 本地插件，桌面/dev 无插件时返回 false）
+    widget.ts                # 桌面小组件桥：快照组装/推送/点击取回/事件监听（同样吞异常）
+    widgetSync.ts            # 同步策略：指纹去重、强制推送、消费小组件点击（打开对应事项）
     lunar.ts                 # 农历（lunar-javascript 封装，含闰月处理）
     format.ts                # 时间格式化（yyyyMMdd-HHmmss / 中文显示）
     tags.ts                  # 标签（工作/生活/学习/健康/财务）
@@ -50,9 +54,11 @@ src/
 src-tauri/
   tauri.conf.json            # version 指向 ../package.json（版本唯一来源）
   capabilities/default.json  # fs 权限（app 递归读写 + watch + 外部路径 scope）与插件权限
-  src/lib.rs                 # 注册 fs / opener / all-files-access 插件
+  src/lib.rs                 # 注册 fs / opener / all-files-access / widget 插件（后两者仅 mobile）
   plugins/all-files-access/  # 本地移动插件：MANAGE_EXTERNAL_STORAGE 声明+授权桥（Rust+Kotlin），
                              # manifest 随 tauri android init 自动合并，改动只改这里
+  plugins/widget/            # 本地移动插件：安卓桌面小组件（Rust 桥 + Kotlin RemoteViews），
+                             # 布局/资源/Provider 都在 android/ 下，同样靠 manifest 合并生效
 ```
 
 ## 关键架构决策
@@ -72,8 +78,8 @@ src-tauri/
 - **归档**：截止已过的事项移入 `<root>/archive/YYYY/`；删除进 `<root>/deleted/`（软删除）。
   `Update(old, new)` 按新截止时间决定落点（未来→items/，过期→archive/）。
 - **应用设置与数据分离**：`settings.json` 固定存于 `$APPDATA` 根，只保存
-  主题 / 强调色 / 数据目录位置三项，不随数据目录迁移（`loadSettings` 会从旧位置
-  `calendar/settings.json` 做一次性迁移读取）。
+  主题 / 强调色 / 数据目录位置 / 桌面小组件开关与条数，不随数据目录迁移
+  （`loadSettings` 会从旧位置 `calendar/settings.json` 做一次性迁移读取）。
 - **查询边界**：事项列表只读 items/（未过期）；日历圆点/选中日日程同时读 items/+archive/，
   已完成事项仍显示在它开始的那天，可继续编辑/设为长期/删除（与桌面端 GetUpcoming 语义一致）。
   日历圆点颜色：该日存在未到期事项=红（`var(--red)`，同 `.item-end`）、仅有已到期事项=绿
@@ -91,6 +97,43 @@ src-tauri/
   应用内写操作走 `afterWrite()` 重读后通知，不等 watcher。监视状态经
   `getWatchStatus()` 暴露（失败原因经 `getWatchError()`），设置页底部"文件监视"区块据此提示
   （watch 生效 / 降级轮询 + 失败原因）。
+
+### 安卓桌面小组件（原生 RemoteViews + Tauri 插件桥）
+- **小组件跑在系统桌面进程里，用不了 WebView/React**：UI 必须原生画（RemoteViews），
+  这里刻意不用 Glance/Compose（少一层依赖，Tauri 生成的原生工程可直接写）。
+  因此架构是「React 只负责数据 → 插件桥 → Kotlin 落盘 + 重绘桌面」。
+- 代码分两层，按官方 Mobile Plugin 约定组织：
+  - Rust 桥 `src-tauri/plugins/widget/`：`Builder::new("widget")` +
+    `register_android_plugin("app.tauri.widget", "WidgetPlugin")`；**命令全部在 Kotlin 实现**，
+    Rust 侧不写 `#[tauri::command]`。桌面端编译为空插件（`not(all(mobile, target_os="android"))`
+    分支），前端调用必须 try/catch（`src/lib/widget.ts` 已统一吞异常）。
+  - Kotlin/资源 `src-tauri/plugins/widget/android/`：`WidgetPlugin`（Tauri 命令）、
+    `TodoWidgetProvider`（AppWidgetProvider，渲染）、`WidgetPrefs`（SharedPreferences 快照）、
+    `WidgetBridge`（插件实例静态引用 + 重绘/事件）、`res/layout/*`、`res/drawable/*`、
+    `res/xml/widget_todo_info.xml`。**不要改 `gen/android/`（CI 每次重新 init）**，
+    Provider 的 `AndroidManifest.xml` 声明放在插件 android 模块里靠 manifest 合并生效
+    （已加断言步骤，同 MANAGE 权限的检查方式）。
+- 数据流：`store.getItems()`（未归档、按优先级）→ `buildWidgetPayload` →
+  `plugin:widget|update`（JSON 字符串）→ `WidgetPrefs.saveFromJson` 落盘 → 立刻
+  `AppWidgetManager.updateAppWidget`。桌面点击某条 → PendingIntent 广播 →
+  写入 `pending_tap` → 拉起 MainActivity；应用存活时 `WidgetBridge` 直接发
+  `widget://launch-item`（前端 `listen` 到就开编辑器），否则前端轮询
+  `plugin:widget|pendingTap` 兜底（`visibilitychange` 时消费）。
+- 点击回传靠 **id 哈希**：前端 `widgetItemId(fileName)` 必须与 `store.ts` 的 `makeId`
+  逐位一致（Kotlin 侧只透传不计算），否则点开的是别的事项。
+- 尺寸：3 列 × 4 行（`targetCellWidth/Height` + `minWidth=250dp`/`minHeight=220dp`，
+  按 Android `70*n-30` 公式）；显示条数 4~12 可调（设置页，默认 8），多出的在底部显示
+  「+N 项待办」。半透明用带 alpha 的 `shape` 圆角 drawable（不用模糊，兼容 minSdk 24），
+  暗/亮两套资源随设置的 `theme` 切换，强调色由 `accentColor` 经 `setTextColor` 下发。
+- 刷新时机：应用内数据/设置变化（`syncWidget` 指纹去重）、冷启动与 `onResume`
+  （原生发 `widget://resync` 让前端重推）、系统 `updatePeriodMillis`（30 分钟，兜底重算相对时间）。
+  相对时间（今天/明天/M月d日）在 Kotlin 侧按当前时间计算，文案在 `strings.xml`。
+- 踩坑预防：`PendingIntent` 必须带 `FLAG_IMMUTABLE`（API 31+ 强制）；
+  `updatePeriodMillis` 最小 30 分钟（不能用作实时刷新）；`RemoteViews` 只认
+  FrameLayout/LinearLayout/RelativeLayout/GridLayout 等白名单容器且层级要浅，
+  所以事项行由 `addView` 动态填充而不是列表适配器；库的资源名统一 `widget_` 前缀
+  避免与应用/模板（模板只有 `app_name`/`main_activity_title`）冲突；
+  `consumer-rules.pro` 必须 keep 住 `app.tauri.widget.**`，否则 release 混淆后桌面加载 Provider 失败。
 
 ### 版本号
 - **`package.json` 是版本唯一来源**；`tauri.conf.json` 的 `"version": "../package.json"` 引用它。
@@ -131,6 +174,7 @@ src-tauri/
 - `fs:scope` 放行 `/storage/emulated/0` 及其下所有（`/**/*` 覆盖不到根目录本身，
   FolderPicker 首屏依赖它；SD 卡等其他挂载点不在范围内，选了会监听失败）
 - `all-files-access:default`（本地插件：授权查询 + 跳设置页）
+- `widget:default`（本地插件：桌面小组件 update / refresh / pendingTap / clearPendingTap）
 - `core:default`、`opener:default`
 - **不要随意收紧/放宽**：前端所有 IO 都走这些权限；Android 上 `$APPDATA` 即应用私有目录。
 
@@ -170,6 +214,9 @@ src-tauri/
 
 - **每次修改完代码后，检查是否有必要同步更新本文件（AGENTS.md）**：架构/约定/踩坑点
   变了就改，保持摘要与代码一致；只改实现细节、无新约定时不改。
+- **提交与推送约定**：除非用户明确要求推送，否则**只做本地提交，不推送**（`git commit` 可以，
+  `git push` 必须先得到用户显式指令）。CI 版本递增与 Release 均由推送触发，误推会连带
+  发新版本，务必谨慎。
 - **本地 Git 分支约定**：仓库默认分支为 `main`（GitHub），本地初始化时默认 `master`；
   推送前统一改名为 `main`。workflow 监听 `main` 和 `master` 双分支，推送哪个都触发构建。
 - UI 文案、错误消息用中文；标识符用英文。
