@@ -71,8 +71,11 @@ class TodoWidgetProvider : AppWidgetProvider() {
 
     /** 右上角「+」：登记新增请求 → 拉起应用（应用存活时另发事件，前端立即开编辑器）。 */
     private fun handleNewItem(context: Context) {
+        // 流水线第 1 步：广播确实到达了 provider（如果这个不增长，说明点击没走到这里）
         try {
+            WidgetPrefs.notePlusStage(context, "broadcast")
             WidgetPrefs.requestNewItem(context)
+            WidgetPrefs.notePlusStage(context, "registered")
         } catch (e: Exception) {
             Log.w(TAG, "写入新增事项请求失败", e)
         }

@@ -24,6 +24,12 @@ function describeWidgetStatus(status: WidgetStatus): string {
   // 待处理请求：可判断「+ / 点击」有没有写进去、应用有没有消费
   if (status.newItem) parts.push('有未处理的「+」新增请求');
   if (status.pendingTap) parts.push('有未处理的点击事项请求');
+  // 「+」流水线：点了加号后这四项应依次 +1，卡在哪个数字就说明断在哪一环
+  if (status.plusBroadcast > 0) {
+    parts.push(
+      `「+」链路 广播${status.plusBroadcast}/登记${status.plusRegistered}/事件${status.plusEvent}/消费${status.plusConsumed}`,
+    );
+  }
   return parts.join(' · ');
 }
 

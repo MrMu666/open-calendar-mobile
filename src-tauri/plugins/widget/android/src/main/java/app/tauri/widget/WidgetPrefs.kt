@@ -30,6 +30,11 @@ object WidgetPrefs {
     private const val KEY_LAST_UPDATE_IDS = "last_update_ids"
     /** 桌面点击「+」：请求应用打开新增事项编辑器。 */
     private const val KEY_NEW_ITEM = "pending_new_item"
+    /** 「+」流水线计数（排障用，见 notePlusStage）：收到广播 / 已登记 / 已发事件 / 已被前端消费。 */
+    private const val KEY_PLUS_BROADCAST = "plus_broadcast"
+    private const val KEY_PLUS_REGISTERED = "plus_registered"
+    private const val KEY_PLUS_EVENT = "plus_event"
+    private const val KEY_PLUS_CONSUMED = "plus_consumed"
 
     /** 同步标记最长有效期：超时后桌面不再显示进度圈。 */
     private const val SYNC_TIMEOUT_MS = 20_000L
@@ -231,11 +236,39 @@ object WidgetPrefs {
         val p = prefs(context)
         if (!p.getBoolean(KEY_NEW_ITEM, false)) return false
         p.edit().remove(KEY_NEW_ITEM).apply()
+        notePlusStage(context, "consumed")
         return true
     }
 
     /** 只读：是否有未处理的「新增事项」请求。 */
     fun hasNewItemRequest(context: Context): Boolean = prefs(context).getBoolean(KEY_NEW_ITEM, false)
+
+    /**
+     * 「+」流水线埋点：记录各阶段累计次数，用于定位到底断在哪一环。
+     * 阶段：收到广播 → 登记请求 → 下发事件 → 前端消费。
+     */
+    fun notePlusStage(context: Context, stage: String) {
+        val key = when (stage) {
+            "broadcast" -> KEY_PLUS_BROADCAST
+            "registered" -> KEY_PLUS_REGISTERED
+            "event" -> KEY_PLUS_EVENT
+            "consumed" -> KEY_PLUS_CONSUMED
+            else -> return
+        }
+        val p = prefs(context)
+        p.edit().putInt(key, p.getInt(key, 0) + 1).apply()
+    }
+
+    /** 读取「+」流水线四个阶段的累计次数（broadcast/registered/event/consumed）。 */
+    fun plusPipeline(context: Context): IntArray {
+        val p = prefs(context)
+        return intArrayOf(
+            p.getInt(KEY_PLUS_BROADCAST, 0),
+            p.getInt(KEY_PLUS_REGISTERED, 0),
+            p.getInt(KEY_PLUS_EVENT, 0),
+            p.getInt(KEY_PLUS_CONSUMED, 0),
+        )
+    }
 
     /**
      * 记录/清除最近一次渲染失败原因。

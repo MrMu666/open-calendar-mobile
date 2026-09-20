@@ -138,6 +138,11 @@ export interface WidgetStatus {
   newItem: boolean;
   /** 是否有未处理的「点击某条事项」请求。 */
   pendingTap: boolean;
+  /** 「+」流水线四阶段累计次数：收到广播 / 已登记 / 已发事件 / 已被前端消费。 */
+  plusBroadcast: number;
+  plusRegistered: number;
+  plusEvent: number;
+  plusConsumed: number;
 }
 
 const EMPTY_STATUS: WidgetStatus = {
@@ -149,6 +154,10 @@ const EMPTY_STATUS: WidgetStatus = {
   providerUpdateIds: 0,
   newItem: false,
   pendingTap: false,
+  plusBroadcast: 0,
+  plusRegistered: 0,
+  plusEvent: 0,
+  plusConsumed: 0,
 };
 
 /** 推送快照到原生并立即重绘桌面；失败返回 null（无插件/桌面端）。 */

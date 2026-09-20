@@ -29,8 +29,10 @@ export default function App() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const storeReady = useRef(false);
-  /** 点击消费互斥：事件与 visibilitychange 可能同时触发，避免重复弹出。 */
+  /** 点击事项消费互斥：事件与 visibilitychange 可能同时触发，避免重复弹出。 */
   const consumingTap = useRef(false);
+  /** 「+」新增消费互斥（与 consumingTap 分开，见 consumeWidgetNew 注释）。 */
+  const consumingNew = useRef(false);
 
   /** 统一刷新入口：先归档过期事项（幂等），再通知各视图重载 + 同步桌面小组件。 */
   const refresh = useCallback(() => {
@@ -69,17 +71,25 @@ export default function App() {
   /**
    * 消费一次小组件右上角「+」的新增请求：打开新增事项编辑器，
    * 与「事项页 → 新增事项」完全同一条路径（onNew = openEditor(null)）。
+   *
+   * 与点击事项的两处关键差异（都是踩过的坑）：
+   * 1. 新增编辑器**不依赖 store 数据**，所以不能用 storeReady 挡着 ——
+   *    之前冷启动时 storeReady 还是 false 就直接 return，请求留着再没人消费，
+   *    表现就是「点 + 只跳到应用、不弹新增」；
+   * 2. 用**独立**的 consumingNew 锁，不能与 consumeWidgetTap 共用 ——
+   *    冷启动时 consumeWidgetTap 会先抢到锁（它要等 store.getItems() 扫盘），
+   *    共用锁会让「+」在这一窗口内被静默丢弃。
    */
   const consumeWidgetNew = useCallback(async (): Promise<void> => {
-    if (!storeReady.current || consumingTap.current) return;
-    consumingTap.current = true;
+    if (consumingNew.current) return;
+    consumingNew.current = true;
     try {
       const requested = await consumeWidgetNewItem();
       if (requested) {
         setEditor({ existing: null });
       }
     } finally {
-      consumingTap.current = false;
+      consumingNew.current = false;
     }
   }, []);
 
@@ -141,6 +151,9 @@ export default function App() {
 
     void listenWidgetResync(() => {
       void syncWidget(true);
+      // 回到前台时顺手把可能滞留的「+」请求也消费掉（原生 onResume 也会补发事件，
+      // 这条是双保险：即使事件通道丢了，只要原生写了标记就能在这里补上）
+      void consumeWidgetNew();
     }).then((un) => {
       if (disposed) un();
       else unlisteners.push(un);

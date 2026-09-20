@@ -61,6 +61,9 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         WidgetBridge.updateNow(activity.applicationContext)
         WidgetBridge.sync(force = true, persist = false)
         checkLaunchIntentForNewItem()
+        // 兜底：前端监听就绪后，若还有未处理的「+」请求就补发一次事件
+        // （冷启动时事件早于前端注册监听会被丢掉，这里补上）
+        WidgetBridge.notifyNewItem(activity.applicationContext)
     }
 
     override fun onPause() {
@@ -188,6 +191,12 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         // 只读展示：是否有待处理的「+」新增请求 / 点击某条事项的请求
         out.put("newItem", WidgetPrefs.hasNewItemRequest(context))
         out.put("pendingTap", WidgetPrefs.getPendingTap(context, false) != null)
+        // 「+」流水线四阶段计数：收到广播 → 登记 → 下发事件 → 前端消费
+        val plus = WidgetPrefs.plusPipeline(context)
+        out.put("plusBroadcast", plus[0])
+        out.put("plusRegistered", plus[1])
+        out.put("plusEvent", plus[2])
+        out.put("plusConsumed", plus[3])
         return out
     }
 }

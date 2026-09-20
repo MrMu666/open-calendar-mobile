@@ -142,6 +142,7 @@ object WidgetBridge {
             // 刻意不判断 hasListener：trigger 在无监听时本身就是 no-op，
             // 少一个分支就少一个失败点（之前"有监听才发"会让竞态窗口内的事件直接丢掉）
             current.trigger(EVENT_NEW_ITEM, JSObject())
+            WidgetPrefs.notePlusStage(context, "event")
         } catch (e: Exception) {
             Log.w(TAG, "下发新增事项事件失败", e)
         }
