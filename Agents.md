@@ -134,6 +134,13 @@ src-tauri/
   所以事项行由 `addView` 动态填充而不是列表适配器；库的资源名统一 `widget_` 前缀
   避免与应用/模板（模板只有 `app_name`/`main_activity_title`）冲突；
   `consumer-rules.pro` 必须 keep 住 `app.tauri.widget.**`，否则 release 混淆后桌面加载 Provider 失败。
+- **`RemoteViews.setInt(viewId, "方法名", 值)` 只能调带 `@RemotableViewMethod` 标注的方法**
+  （AOSP `RemoteViews$ReflectionAction.apply()` 强校验，未标注直接抛 `ActionException`）。
+  **一个 action 抛异常会让整次 `apply()` 作废**：桌面小组件只剩空白底、连点击都失效，
+  而**我们侧构造 RemoteViews 完全不报错**（异常在 launcher 进程），极难排查。
+  已确认可用：`View.setBackgroundResource`、`View.setBackgroundColor`、`TextView.setTextColor`；
+  **不可用**：`ImageView.setColorFilter`（已踩此坑——进度圈染色导致整个小组件空白）。
+  要改颜色用预置 drawable/color 资源，不要用反射式 setInt 调未标注方法。
 - **Tauri Kotlin API 版本敏感点（改这块前先看 `~/.cargo/registry/.../tauri-<ver>/mobile/android/...` 源码）**：
   - `Plugin` 只有**无参** `onPause()` / `onResume()`（`onDestroy`/`onRestart` 才带
     `AppCompatActivity` 参数）——写成 `override fun onResume(activity: AppCompatActivity)`

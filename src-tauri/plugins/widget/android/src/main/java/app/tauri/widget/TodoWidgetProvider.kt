@@ -7,9 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.StrikethroughSpan
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
@@ -156,13 +153,11 @@ class TodoWidgetProvider : AppWidgetProvider() {
             views.setInt(R.id.widget_date, "setTextColor", subColor)
             views.setInt(R.id.widget_footer, "setTextColor", subColor)
             views.setInt(R.id.widget_empty_text, "setTextColor", subColor)
-            // 进度圈染色是可选项：RemoteViews 若不支持 ImageView#setColorFilter，
-            // 这里会抛 ActionException。包起来，宁可进度圈用默认色也不要整个小组件空白。
-            try {
-                views.setInt(R.id.widget_progress, "setColorFilter", accent)
-            } catch (e: Exception) {
-                Log.w(TAG, "进度圈染色失败，使用默认颜色", e)
-            }
+            // 注意：这里**不能**用 setInt(..., "setColorFilter", ...) 给进度圈染色。
+            // ImageView#setColorFilter 没有 @RemotableViewMethod 标注，
+            // launcher 侧 ReflectionAction.apply() 会抛 ActionException，
+            // 而**一个 action 失败会让整次 apply 作废**（桌面只剩空白底、点击也失效）——已踩坑。
+            // 进度圈颜色直接用 widget_spinner_ring.xml 里的固定色。
 
             val now = System.currentTimeMillis()
             views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_name))
@@ -266,18 +261,10 @@ class TodoWidgetProvider : AppWidgetProvider() {
             } else {
                 item.title
             }
-            // 删除线同样是可选效果（跨进程传 Spannable 极端情况下会失败）：失败则退化为纯文本
-            val titleText: CharSequence = if (done) {
-                try {
-                    strike(title)
-                } catch (e: Exception) {
-                    Log.w(TAG, "删除线渲染失败，退化为纯文本", e)
-                    title
-                }
-            } else {
-                title
-            }
-            row.setTextViewText(R.id.widget_item_title, titleText)
+            // 刻意不用 SpannableString 删除线：跨进程传递 span 属非标准用法，
+            // 一旦 launcher 侧拒绝会连累整次 apply 作废（同 setColorFilter 的坑）。
+            // 已到期用灰色 + 「OK」徽标 + 「已到期」文案区分。
+            row.setTextViewText(R.id.widget_item_title, title)
             row.setInt(R.id.widget_item_title, "setTextColor", if (done) subColor else textColor)
 
             val metaText = if (item.longTerm) {
@@ -306,13 +293,6 @@ class TodoWidgetProvider : AppWidgetProvider() {
 
         /** 取色：Context.getColor 自 API 23 起可用（minSdk 24），无需 androidx 依赖。 */
         private fun color(context: Context, resId: Int): Int = context.getColor(resId)
-
-        /** 已到期事项标题加删除线（RemoteViews 只能传 CharSequence，用 Spannable 实现）。 */
-        private fun strike(text: String): CharSequence {
-            val spannable = SpannableString(text)
-            spannable.setSpan(StrikethroughSpan(), 0, spannable.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            return spannable
-        }
 
         /** 十六进制颜色（#RGB/#RRGGBB/#AARRGGBB）解析，非法回退 fallback。 */
         private fun parseColor(hex: String, fallback: Int): Int =
