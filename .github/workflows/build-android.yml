@@ -51,12 +51,33 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        # 不用 android-actions/setup-android@v3：它在 runner 镜像的
+        # cmdline-tools/16.0 下会执行 `sdkmanager tools`，而新版 SDK 已移除独立的
+        # "tools" 包 → "Failed to find package 'tools'" → 退出码 1，整个 job 直接失败
+        # （2026-09 起 GitHub 镜像 + 该 action 的兼容性故障）。
+        # runner 自带完整 SDK，这里直接用，并校验工具链是否就绪。
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "SDK root: $SDK"
+          # sdkmanager 可能只存在于 cmdline-tools/<版本>/bin（没有 latest），逐个尝试
+          while IFS= read -r dir; do
+            if [ -x "$dir/sdkmanager" ]; then export PATH="$dir:$PATH"; break; fi
+          done < <(ls -d "$SDK"/cmdline-tools/*/bin "$SDK"/cmdline-tools/latest/bin 2>/dev/null || true)
+          export PATH="$SDK/platform-tools:$SDK/tools/bin:$PATH"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$PATH" >> "$GITHUB_PATH"
+          command -v java >/dev/null || { echo "::error::未找到 java"; exit 1; }
+          command -v sdkmanager >/dev/null || { echo "::error::未找到 sdkmanager（$SDK/cmdline-tools/*/bin）"; exit 1; }
+          echo "sdkmanager: $(command -v sdkmanager)"
 
       - name: Install NDK
         run: |
-          sdkmanager --install "ndk;27.0.12077973" >/dev/null
+          set -euo pipefail
+          sdkmanager --install "ndk;27.0.12077973"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          echo "NDK: $(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null || echo '未找到')"
 
       - name: Install frontend dependencies
         run: npm ci
