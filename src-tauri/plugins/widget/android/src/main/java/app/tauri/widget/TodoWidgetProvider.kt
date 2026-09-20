@@ -97,13 +97,9 @@ class TodoWidgetProvider : AppWidgetProvider() {
         const val ACTION_RESYNC = "app.tauri.widget.ACTION_RESYNC"
 
         private const val EXTRA_ITEM_ID = "item_id"
-        private const val EXTRA_ROW = "row"
 
         private const val META_MAX_CHARS = 14
         private const val TITLE_MAX_CHARS = 22
-
-        /** 应用是否在前台（转发给桥，保持 provider 与 bridge 单向依赖）。 */
-        fun isVisible(): Boolean = WidgetBridge.isAppVisible()
 
         /** 渲染一个小组件实例（也供 [WidgetBridge] 主动刷新使用）。 */
         fun buildViews(context: Context, appWidgetId: Int): RemoteViews {
@@ -230,7 +226,6 @@ class TodoWidgetProvider : AppWidgetProvider() {
             // 点击该行：广播回 provider（启动应用 + 记录待打开事项）
             val clickIntent = Intent(context, TodoWidgetProvider::class.java)
                 .setAction(ACTION_OPEN_ITEM)
-                .putExtra(EXTRA_ROW, index)
                 .putExtra(EXTRA_ITEM_ID, item.id)
             row.setOnClickPendingIntent(
                 R.id.widget_item_row,

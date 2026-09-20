@@ -4,7 +4,6 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.util.Log
-import androidx.appcompat.app.AppCompatActivity
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
@@ -16,6 +15,10 @@ import app.tauri.plugin.Plugin
  *   - 小组件被点击 → [WidgetPrefs.setPendingTap]，插件实例存活且有监听时另发
  *     [EVENT_LAUNCH_ITEM] 事件即时打开；否则由前端轮询 `pendingTap` 兜底
  *   - 应用回到前台 → [sync] 向仍存活的前端发 [EVENT_RESYNC] 要一次最新数据
+ *
+ * 注意：这里刻意不访问 `Plugin` 的 activity 字段（tauri 2.11.5 的
+ * `Plugin(private val activity: Activity)` 是私有构造属性），需要 Context 时用
+ * [attach] 传入的 applicationContext，前台可见性由插件 onResume/onPause 维护。
  */
 object WidgetBridge {
 
@@ -30,8 +33,18 @@ object WidgetBridge {
     @Volatile
     private var plugin: Plugin? = null
 
-    fun attach(instance: Plugin) {
+    /** 应用级 Context（由插件构造时传入），通知/落盘/重绘都用它。 */
+    @Volatile
+    private var appContext: Context? = null
+
+    /** 应用是否处于前台（由插件 onResume/onPause 维护）。 */
+    @Volatile
+    private var foreground = false
+
+    /** 注册插件实例（在 [WidgetPlugin] 构造时调用）。 */
+    fun attach(instance: Plugin, context: Context) {
         plugin = instance
+        appContext = context.applicationContext
     }
 
     fun detach(instance: Plugin) {
@@ -39,6 +52,13 @@ object WidgetBridge {
     }
 
     fun isAttached(): Boolean = plugin != null
+
+    fun setForeground(value: Boolean) {
+        foreground = value
+    }
+
+    /** 应用是否在前台：由 [WidgetPlugin] 的 onResume/onPause 维护，不触碰超类私有字段。 */
+    fun isAppVisible(): Boolean = foreground
 
     /** 前端是否已注册监听（未注册时点击事件留给 pendingTap 兜底，不清除）。 */
     fun hasLaunchListener(): Boolean =
@@ -54,17 +74,6 @@ object WidgetBridge {
         } catch (e: Exception) {
             false
         }
-
-    /** 应用是否可见（不可见时不打扰前端）。 */
-    fun isAppVisible(): Boolean {
-        val current = plugin ?: return false
-        val activity = try {
-            current.activity as? AppCompatActivity
-        } catch (e: Exception) {
-            null
-        } ?: return false
-        return !activity.isFinishing && !activity.isDestroyed
-    }
 
     /** 数据推送：解析 JSON → 落盘 → 立即重绘全部小组件实例。 */
     fun pushFromJson(context: Context, json: String) {
@@ -91,11 +100,12 @@ object WidgetBridge {
      */
     fun sync(force: Boolean, persist: Boolean) {
         val current = plugin ?: return
+        val context = appContext
         try {
             if (!hasResyncListener()) return
             if (!force && !isAppVisible()) return
-            if (persist) {
-                updateNow(current.activity.applicationContext)
+            if (persist && context != null) {
+                updateNow(context)
             }
             val payload = JSObject()
             payload.put("persist", persist)

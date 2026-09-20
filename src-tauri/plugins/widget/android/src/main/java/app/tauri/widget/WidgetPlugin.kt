@@ -34,27 +34,39 @@ class PendingTapArgs {
  * 事件（前端 registerListener 注册即可收到）：
  *   - widget://launch-item：应用存活时点击某条事项后即时下发
  *   - widget://resync：应用回到前台时请求前端重推数据
+ *
+ * 生命周期用构造参数里的 activity（子类自己的属性），不访问超类 Plugin 的
+ * 私有 activity 字段；可见性由 onResume/onPause 维护（见 [WidgetBridge]）。
  */
 @TauriPlugin
 class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
 
-    /** 注册后供 launcher 侧回调使用（见 [WidgetBridge]）。 */
     init {
-        WidgetBridge.attach(this)
+        WidgetBridge.attach(this, activity.applicationContext)
     }
 
     override fun load(webView: android.webkit.WebView) {
         // 冷启动兜底：应用一起来就重绘一次（沿用上次快照），并请求前端推送最新数据
         WidgetBridge.updateNow(activity.applicationContext)
+        WidgetBridge.sync(force = true, persist = false)
     }
 
-    override fun onResume(activity: AppCompatActivity) {
-        // 回到前台：拉一次最新数据（widget 可能停留在旧快照）
+    /**
+     * 回到前台：标记可见 + 重绘一次（可能停在旧快照），并向存活的前端要最新数据。
+     * 注意签名：tauri 2.11.5 的 Plugin 只有无参 onResume()（onPause 同样无参）。
+     */
+    override fun onResume() {
+        WidgetBridge.setForeground(true)
         WidgetBridge.updateNow(activity.applicationContext)
         WidgetBridge.sync(force = true, persist = false)
     }
 
+    override fun onPause() {
+        WidgetBridge.setForeground(false)
+    }
+
     override fun onDestroy(activity: AppCompatActivity) {
+        WidgetBridge.setForeground(false)
         WidgetBridge.detach(this)
     }
 
