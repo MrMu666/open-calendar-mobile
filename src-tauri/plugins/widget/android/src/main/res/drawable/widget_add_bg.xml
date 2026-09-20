@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 「新增事项」按钮底：实心圆（颜色由 Kotlin 侧按强调色覆盖） -->
+<!-- 「新增事项」按钮底：圆角矩形（不用正圆，方形按钮配圆角更协调），
+     填充色由 Kotlin 侧按强调色覆盖 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
+    android:shape="rectangle">
     <solid android:color="@color/widget_priority_p3" />
+    <corners android:radius="6dp" />
 </shape>

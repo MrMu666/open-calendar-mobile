@@ -5,8 +5,6 @@
     <string name="widget_today">今天</string>
     <string name="widget_tomorrow">明天</string>
     <string name="widget_yesterday">昨天</string>
-    <string name="widget_long_term">长期</string>
-    <string name="widget_expired">已到期</string>
     <string name="widget_done_badge">OK</string>
     <string name="widget_more">+%1$d 项待办</string>
     <string name="widget_active_count">%1$d 项待办</string>

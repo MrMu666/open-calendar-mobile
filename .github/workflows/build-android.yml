@@ -30,12 +30,21 @@ jobs:
           echo "已递增版本号 -> $NEW_VERSION"
 
       - name: Commit version bump
-        # GITHUB_TOKEN 的 push 不会再次触发 workflow，配合 [skip ci] 双保险
+        # GITHUB_TOKEN 的 push 不会再次触发 workflow，配合 [skip ci] 双保险。
+        # 提交说明 = 「版本递增标题 + 本次推送提交的完整说明」，
+        # 这样该版本的 tag 自身就带有本次变更内容（Release 说明也从这里取）。
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json src-tauri/tauri.conf.json
-          git commit -m "chore: bump version to v${{ steps.bump.outputs.new_version }} [skip ci]"
+          {
+            echo "chore: bump version to v${{ steps.bump.outputs.new_version }} [skip ci]"
+            echo ""
+            echo "本次版本包含以下提交："
+            echo ""
+            git log -1 --format='%B' "$GITHUB_SHA"
+          } > /tmp/commit-msg.txt
+          git commit -F /tmp/commit-msg.txt
           git push
 
       - name: Setup Rust
@@ -162,23 +171,58 @@ jobs:
           test "$(ls apks/*.apk 2>/dev/null | wc -l)" -ge 1
 
       - name: Tag release version
-        # tag push 不匹配 branches 过滤器，不会重复触发本 workflow；已存在则跳过
+        # tag push 不匹配 branches 过滤器，不会重复触发本 workflow；已存在则跳过。
+        # 用带注释的 tag：tag 说明 = 版本递增提交的说明（含本次推送的提交内容），
+        # Release 说明直接从 tag 读取，保证「每个版本的说明各不相同」。
         run: |
-          git tag "v${{ steps.bump.outputs.new_version }}" || echo "tag 已存在"
-          git push origin "v${{ steps.bump.outputs.new_version }}" || echo "tag 已推送"
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          TAG="v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG 已存在"
+          else
+            {
+              echo "OpenCalendar $TAG"
+              echo ""
+              git log -1 --format='%B' HEAD
+            } > /tmp/tag-msg.txt
+            git tag -a "$TAG" -F /tmp/tag-msg.txt
+          fi
+          echo "----- tag 说明 -----"
+          git tag -l --format='%(contents)' "$TAG"
+          git push origin "$TAG" || echo "tag 已推送"
 
       - name: Create GitHub Release with APKs
-        # Release 资产直接下载原始 .apk 文件（Artifact 下载才是 zip，故不用它）
+        # Release 资产直接下载原始 .apk 文件（Artifact 下载才是 zip，故不用它）。
+        # 说明用该 tag 的注释（= 该版本的提交说明），并在末尾附上安装选择与完整提交列表。
+        env:
+          VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          TAG="v$VERSION"
+          {
+            git tag -l --format='%(contents)' "$TAG"
+            echo ""
+            echo "## 安装"
+            echo ""
+            echo "按架构拆分（文件名含 ABI）："
+            echo ""
+            echo "- 手机一般选 **arm64-v8a**（64 位，主流）"
+            echo "- 老设备选 **armeabi-v7a**"
+            echo "- 模拟器选 **x86_64** / **x86**"
+            echo ""
+            echo "下载对应你设备的 APK 直接安装。"
+            echo ""
+            echo "## 本次提交"
+            echo ""
+            git log --pretty='- %s' "v$VERSION^..$TAG" 2>/dev/null || true
+          } > /tmp/release-body.md
+          echo "----- Release 说明 -----"
+          cat /tmp/release-body.md
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump.outputs.new_version }}
           name: OpenCalendar v${{ steps.bump.outputs.new_version }}
-          body: |
-            ## OpenCalendar v${{ steps.bump.outputs.new_version }}
-
-            推送自动构建，按架构拆分 APK（文件名含 ABI 标识）。
-
-            手机一般选 **arm64-v8a**（64 位，主流）；老设备选 **armeabi-v7a**；模拟器选 x86_64 / x86。
-            下载对应你设备的 APK 直接安装。
+          body_path: /tmp/release-body.md
           files: apks/*.apk
           fail_on_unmatched_files: true

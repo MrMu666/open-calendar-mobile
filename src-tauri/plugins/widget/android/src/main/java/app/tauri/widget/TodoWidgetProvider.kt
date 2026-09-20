@@ -137,8 +137,8 @@ class TodoWidgetProvider : AppWidgetProvider() {
         /** 「+」按钮的 PendingIntent requestCode 基址，避开事项行（appWidgetId*100+index）。 */
         private const val ADD_REQUEST_CODE_BASE = 900_000
 
-        private const val META_MAX_CHARS = 14
-        private const val TITLE_MAX_CHARS = 22
+        // 标题截断：行内不再显示时间，宽度全给标题，故可放宽到 28 字（配合 maxLines=2）
+        private const val TITLE_MAX_CHARS = 28
 
         /**
          * 渲染并捕获异常：launcher 进程里的崩溃会被系统静默吞掉（桌面只剩空白框架），
@@ -288,12 +288,10 @@ class TodoWidgetProvider : AppWidgetProvider() {
             val expired = !item.longTerm && item.endAt in 1 until now
 
             row.setInt(R.id.widget_item_row, "setBackgroundResource", rowBg)
-            row.setImageViewResource(
-                R.id.widget_item_phase,
-                if (done) R.drawable.widget_dot_done else R.drawable.widget_dot_active
-            )
 
-            // 优先级徽标：P1 红 / P2 橙 / P3 强调色 / P4 灰；已到期统一灰 + OK
+            // 优先级徽标：P1 红 / P2 橙 / P3 强调色 / P4 灰；已到期统一灰 + OK。
+            // 行首的 P 标记本身就是圆点（widget_item_priority 用 widget_badge_bg 圆角底 +
+            // 同色文字），所以不再单放状态点——避免一个红点与 P1/P2 分级色不一致。
             val badgeColor = if (done || expired) {
                 color(context, R.color.widget_priority_p4)
             } else {
@@ -317,19 +315,11 @@ class TodoWidgetProvider : AppWidgetProvider() {
             }
             // 刻意不用 SpannableString 删除线：跨进程传递 span 属非标准用法，
             // 一旦 launcher 侧拒绝会连累整次 apply 作废（同 setColorFilter 的坑）。
-            // 已到期用灰色 + 「OK」徽标 + 「已到期」文案区分。
+            // 已到期用灰色 + 「OK」徽标区分。
             row.setTextViewText(R.id.widget_item_title, title)
             row.setInt(R.id.widget_item_title, "setTextColor", if (done) subColor else textColor)
 
-            val metaText = if (item.longTerm) {
-                context.getString(R.string.widget_long_term)
-            } else {
-                val whenText = "${dayText(context, Date(item.endAt))} ${timeText(Date(item.endAt))}"
-                if (expired) "$whenText · ${context.getString(R.string.widget_expired)}" else whenText
-            }
-            val meta = if (metaText.length > META_MAX_CHARS) metaText.substring(metaText.length - META_MAX_CHARS) else metaText
-            row.setTextViewText(R.id.widget_item_meta, meta)
-            row.setInt(R.id.widget_item_meta, "setTextColor", subColor)
+            // 时间行已去掉：3x4 空间有限，标题优先（相对时间仍用于「已推送」等头部/空态文案）
 
             // 点击该行：广播回 provider（启动应用 + 记录待打开事项）
             val clickIntent = Intent(context, TodoWidgetProvider::class.java)

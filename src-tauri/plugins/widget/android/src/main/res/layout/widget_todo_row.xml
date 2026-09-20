@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 单条待办行：状态点 + 优先级徽标 + 标题 +（标签）+ 截止时间
+<!-- 单条待办行：优先级圆点 + 标题
+     行内刻意不放时间：空间全部让给标题（3x4 的格子里标题比时间有价值）。
+     圆点颜色由 Kotlin 侧按优先级下发，与 P 徽标同色。
      RemoteViews 不支持 ConstraintLayout/TableLayout，故用 RelativeLayout 平铺。 -->
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_item_row"
@@ -12,22 +14,13 @@
     android:paddingEnd="@dimen/widget_row_padding_h"
     android:paddingBottom="@dimen/widget_row_padding_v">
 
-    <ImageView
-        android:id="@+id/widget_item_phase"
-        android:layout_width="6dp"
-        android:layout_height="6dp"
-        android:layout_alignParentStart="true"
-        android:layout_centerVertical="true"
-        android:contentDescription="@null"
-        android:src="@drawable/widget_dot_active" />
-
     <TextView
         android:id="@+id/widget_item_priority"
         style="@style/Widget.Todo.Badge"
+        android:layout_alignParentStart="true"
         android:layout_centerVertical="true"
-        android:layout_marginStart="6dp"
-        android:layout_toEndOf="@id/widget_item_phase"
-        android:textColor="@color/widget_text_dark" />
+        android:background="@drawable/widget_badge_bg"
+        android:textColor="@color/widget_priority_p1" />
 
     <TextView
         android:id="@+id/widget_item_title"
@@ -36,21 +29,8 @@
         android:layout_centerVertical="true"
         android:layout_marginStart="7dp"
         android:layout_toEndOf="@id/widget_item_priority"
-        android:layout_toStartOf="@id/widget_item_meta"
         android:ellipsize="end"
-        android:singleLine="true"
+        android:maxLines="2"
         android:textColor="@color/widget_text_dark"
         android:textSize="12sp" />
-
-    <TextView
-        android:id="@+id/widget_item_meta"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignParentEnd="true"
-        android:layout_centerVertical="true"
-        android:layout_marginStart="6dp"
-        android:ellipsize="end"
-        android:singleLine="true"
-        android:textColor="@color/widget_subtext_dark"
-        android:textSize="10sp" />
 </RelativeLayout>

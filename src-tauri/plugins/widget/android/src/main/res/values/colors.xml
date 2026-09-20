@@ -25,6 +25,12 @@
     <color name="widget_phase_active">#EF4444</color>
     <color name="widget_phase_done">#22C55E</color>
 
+    <!-- 优先级圆点（与 P1..P4 徽标同色，Kotlin 侧按优先级选择） -->
+    <color name="widget_dot_p1">#EF4444</color>
+    <color name="widget_dot_p2">#F59E0B</color>
+    <color name="widget_dot_p3">#3B82F6</color>
+    <color name="widget_dot_p4">#94A3B8</color>
+
     <!-- 优先级徽标：P1 红 / P2 橙 / P3 蓝 / P4 灰（与标签色系一致） -->
     <color name="widget_priority_p1">#EF4444</color>
     <color name="widget_priority_p2">#F59E0B</color>
