@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Widget.Todo.Badge">
+    <!-- parent="" 必须显式声明：Android 对带点号的 style 名会按“点号隐式继承”
+         （Widget.Todo.Badge 默认继承 Widget.Todo），而父样式并不存在 →
+         AAPT 报 `resource style/Widget.Todo not found`，资源链接失败、构建中断。 -->
+    <style name="Widget.Todo.Badge" parent="">
         <item name="android:layout_width">@dimen/widget_badge_size</item>
         <item name="android:layout_height">@dimen/widget_badge_size</item>
         <item name="android:gravity">center</item>
