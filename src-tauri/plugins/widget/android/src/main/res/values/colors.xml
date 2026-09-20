@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 半透明样式：卡片/行/徽标全部带 alpha，桌面壁纸透出（不使用模糊，兼容 minSdk 24）。 -->
+<resources>
+    <!-- 暗色（跟随系统深色模式） -->
+    <color name="widget_card_dark">#B31B2029</color>
+    <color name="widget_card_border_dark">#2EFFFFFF</color>
+    <color name="widget_row_dark">#14FFFFFF</color>
+    <color name="widget_row_border_dark">#1FFFFFFF</color>
+    <color name="widget_badge_dark">#24FFFFFF</color>
+    <color name="widget_text_dark">#F2FFFFFF</color>
+    <color name="widget_subtext_dark">#8CFFFFFF</color>
+    <color name="widget_divider_dark">#1FFFFFFF</color>
+
+    <!-- 亮色（浅色壁纸/亮色主题） -->
+    <color name="widget_card_light">#B8FFFFFF</color>
+    <color name="widget_card_border_light">#24000000</color>
+    <color name="widget_row_light">#0A000000</color>
+    <color name="widget_row_border_light">#14000000</color>
+    <color name="widget_badge_light">#1A000000</color>
+    <color name="widget_text_light">#F21F2430</color>
+    <color name="widget_subtext_light">#992F3542</color>
+    <color name="widget_divider_light">#14000000</color>
+
+    <!-- 状态标记：未到期=红（同事项卡片截止日期）、已到期=绿（同开始日期） -->
+    <color name="widget_phase_active">#EF4444</color>
+    <color name="widget_phase_done">#22C55E</color>
+
+    <!-- 优先级徽标：P1 红 / P2 橙 / P3 蓝 / P4 灰（与标签色系一致） -->
+    <color name="widget_priority_p1">#EF4444</color>
+    <color name="widget_priority_p2">#F59E0B</color>
+    <color name="widget_priority_p3">#3B82F6</color>
+    <color name="widget_priority_p4">#64748B</color>
+</resources>

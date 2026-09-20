@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 3×4 待办小组件：半透明卡片（Header + 事项列表容器 + Footer）
+     RemoteViews 布局层级刻意压浅：只允许 FrameLayout / LinearLayout / RelativeLayout
+     等白名单容器，事项行由 Kotlin 侧 addView 动态填充（widget_todo_row.xml）。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="2dp">
+
+    <LinearLayout
+        android:id="@+id/widget_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_card_bg"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_card_padding">
+
+        <LinearLayout
+            android:id="@+id/widget_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingBottom="5dp">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:text="@string/widget_name"
+                android:textColor="@color/widget_text_dark"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_count"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/widget_subtext_dark"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/widget_date"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:textColor="@color/widget_subtext_dark"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/widget_divider_dark" />
+
+        <LinearLayout
+            android:id="@+id/widget_items"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingTop="4dp" />
+
+        <TextView
+            android:id="@+id/widget_footer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:paddingTop="3dp"
+            android:singleLine="true"
+            android:textColor="@color/widget_subtext_dark"
+            android:textSize="9sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- 列表为空时：应用刷新中显示进度圈，否则提示暂无事项 -->
+    <LinearLayout
+        android:id="@+id/widget_empty"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- 不用 ?android:attr/progressBarStyleSmall：库布局在桌面进程 inflate，
+             主题属性可能取不到，直接给尺寸 + 自带 drawable 更稳 -->
+        <ProgressBar
+            android:id="@+id/widget_progress"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:indeterminate="true"
+            android:indeterminateDrawable="@drawable/widget_progress"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/widget_empty_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/widget_empty"
+            android:textColor="@color/widget_subtext_dark"
+            android:textSize="11sp" />
+    </LinearLayout>
+</FrameLayout>

@@ -1,5 +1,6 @@
 import { BaseDirectory, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { sanitizeRootPath } from './store';
+import { WIDGET_DEFAULT_LIMIT } from './widget';
 
 /**
  * 应用设置：对应桌面端 UserSettings（外观部分 + 数据目录）。
@@ -22,6 +23,10 @@ export interface UserSettings {
   dataDir: string;
   /** external 模式：外部绝对路径（如 "/storage/emulated/0/Download"）。 */
   externalPath: string;
+  /** 是否启用安卓桌面小组件的数据推送（关闭后桌面保留最后一次快照）。 */
+  widgetEnabled: boolean;
+  /** 小组件最多显示条数（3×4 建议 6~12）。 */
+  widgetLimit: number;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -30,6 +35,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   storageMode: 'appData',
   dataDir: 'calendar',
   externalPath: '',
+  widgetEnabled: true,
+  widgetLimit: WIDGET_DEFAULT_LIMIT,
 };
 
 /** 强调色预设（设置页用）。 */

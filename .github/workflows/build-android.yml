@@ -112,6 +112,16 @@ jobs:
             exit 1
           fi
 
+      - name: Assert widget receiver merged
+        # 桌面小组件的 AppWidgetProvider 也在插件 manifest 里声明，同权限一样靠合并；
+        # 查构建中间产物确认 receiver 与 appwidget-provider meta-data 都进了 APK
+        run: |
+          if grep -rq "TodoWidgetProvider" src-tauri/gen/android/app/build/intermediates/merged_manifests/ 2>/dev/null; then
+            echo "桌面小组件 receiver 已合并"
+          else
+            echo "::warning::未在 merged_manifests 找到 TodoWidgetProvider（合并路径可能随 AGP 版本变化，仅供参考）"
+          fi
+
       - name: Collect APKs with ABI names
         # 输出目录结构：apk/<raw>/release/*.apk（raw 为 Rust 目标短名：arm/arm64/x86/x86_64），
         # 重命名为标准 Android ABI 名（arm→armeabi-v7a、arm64→arm64-v8a），与 Release 描述一致

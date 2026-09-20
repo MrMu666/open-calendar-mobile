@@ -5,22 +5,27 @@ import type { Theme, UserSettings } from '../lib/settings';
 import { ACCENT_PRESETS, DEFAULT_SETTINGS } from '../lib/settings';
 import { isAllFilesAccessGranted, openAllFilesAccessSettings } from '../lib/allFilesAccess';
 import { store } from '../lib/store';
+import { WIDGET_LIMIT_OPTIONS } from '../lib/widget';
+import { forceRefreshWidget } from '../lib/widgetSync';
 import FolderPicker, { EXTERNAL_ROOT } from './FolderPicker';
 
 interface Props {
   settings: UserSettings;
   onChange: (patch: Partial<UserSettings>) => void;
+  /** 数据目录切换完成：通知上层失效桌面小组件指纹并重推。 */
+  onStorePathChanged: () => void;
   refreshTick: number;
 }
 
-/** 设置页：外观（亮/暗主题、强调色）+ 数据（存储目录）+ 关于。 */
-export default function SettingsView({ settings, onChange, refreshTick }: Props) {
+/** 设置页：外观（亮/暗主题、强调色）+ 数据（存储目录）+ 桌面小组件 + 关于。 */
+export default function SettingsView({ settings, onChange, onStorePathChanged, refreshTick }: Props) {
   const [appDir, setAppDir] = useState('');
   const [dirError, setDirError] = useState('');
   const [granted, setGranted] = useState<boolean | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [version, setVersion] = useState('');
+  const [widgetMsg, setWidgetMsg] = useState('');
 
   useEffect(() => {
     appDataDir()
@@ -67,6 +72,7 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     try {
       await store.setExternalPath(absPath);
       onChange({ storageMode: 'external', externalPath: absPath });
+      onStorePathChanged();
     } catch (err) {
       setDirError(err instanceof Error ? err.message : '切换目录失败。');
     }
@@ -98,8 +104,20 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
     try {
       await store.setRoot(DEFAULT_SETTINGS.dataDir);
       onChange({ storageMode: 'appData', dataDir: DEFAULT_SETTINGS.dataDir, externalPath: '' });
+      onStorePathChanged();
     } catch (err) {
       setDirError(err instanceof Error ? err.message : '恢复默认目录失败。');
+    }
+  };
+
+  /** 立即把当前数据与外观推给桌面小组件（强制，忽略指纹）。 */
+  const handleWidgetRefresh = async (): Promise<void> => {
+    setWidgetMsg('刷新中…');
+    try {
+      await forceRefreshWidget();
+      setWidgetMsg(`已推送 ${itemCount ?? 0} 条事项`);
+    } catch {
+      setWidgetMsg('推送失败（桌面端 / 开发环境无此能力）');
     }
   };
 
@@ -196,6 +214,56 @@ export default function SettingsView({ settings, onChange, refreshTick }: Props)
           <span className="setting-label">未归档事项</span>
           <span className="setting-value">{itemCount === null ? '…' : itemCount} 条</span>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-title">桌面小组件</div>
+
+        <div className="setting-row">
+          <span className="setting-label">数据推送</span>
+          <div className="theme-toggle" role="group" aria-label="桌面小组件数据推送">
+            {([true, false] as boolean[]).map((on) => (
+              <button
+                key={String(on)}
+                type="button"
+                className={`theme-option${settings.widgetEnabled === on ? ' active' : ''}`}
+                onClick={() => onChange({ widgetEnabled: on })}
+              >
+                {on ? '开启' : '关闭'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="setting-row">
+          <span className="setting-label">显示条数</span>
+          <div className="theme-toggle" role="group" aria-label="桌面小组件显示条数">
+            {WIDGET_LIMIT_OPTIONS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`theme-option${settings.widgetLimit === n ? ' active' : ''}`}
+                onClick={() => onChange({ widgetLimit: n })}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dir-row">
+          <button type="button" className="btn small primary" onClick={() => void handleWidgetRefresh()}>
+            立即推送数据
+          </button>
+          {widgetMsg && <span className="setting-value">{widgetMsg}</span>}
+        </div>
+
+        <p className="settings-note">
+          桌面小组件是安卓原生桌面元素（3×4、半透明），需在系统桌面的「添加小组件」
+          里手动添加；本应用只负责把待办快照推给它。显示未归档事项（按优先级排序，
+          最多 {settings.widgetLimit} 条），点击某条直接打开对应事项，点击空白处打开应用。
+          关闭推送后桌面保留最后一次快照；主题与强调色会同步到小组件。
+        </p>
       </div>
 
       <div className="settings-section">

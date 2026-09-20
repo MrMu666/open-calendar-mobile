@@ -3,8 +3,9 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(mobile)]
-    let builder =
-        tauri::Builder::default().plugin(tauri_plugin_all_files_access::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_all_files_access::init())
+        .plugin(tauri_plugin_widget::init());
     #[cfg(not(mobile))]
     let builder = tauri::Builder::default();
     builder

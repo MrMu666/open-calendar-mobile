@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小组件内边距：与卡片圆角呼应 -->
+    <dimen name="widget_card_padding">10dp</dimen>
+    <dimen name="widget_row_padding_h">7dp</dimen>
+    <dimen name="widget_row_padding_v">4dp</dimen>
+    <dimen name="widget_badge_size">18dp</dimen>
+</resources>

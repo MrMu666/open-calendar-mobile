@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Widget.Todo.Badge">
+        <item name="android:layout_width">@dimen/widget_badge_size</item>
+        <item name="android:layout_height">@dimen/widget_badge_size</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">9sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:background">@drawable/widget_badge_bg</item>
+    </style>
+</resources>

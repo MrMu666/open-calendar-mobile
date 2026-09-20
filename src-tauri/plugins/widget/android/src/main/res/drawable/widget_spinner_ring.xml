@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 同步提示圆环（颜色由 Kotlin 用 setInt("setColorFilter") 套强调色） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="ring"
+    android:innerRadiusRatio="3"
+    android:thicknessRatio="9"
+    android:useLevel="false">
+    <solid android:color="@color/widget_subtext_dark" />
+</shape>
