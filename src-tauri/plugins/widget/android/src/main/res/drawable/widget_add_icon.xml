@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 加号图标：白色两条 2dp 圆头线，24x24 viewport，tint 由 Kotlin 侧下发 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11,5h2v14h-2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,11h14v2h-14z" />
+</vector>

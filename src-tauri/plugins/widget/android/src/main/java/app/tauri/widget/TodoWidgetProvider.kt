@@ -77,7 +77,7 @@ class TodoWidgetProvider : AppWidgetProvider() {
             Log.w(TAG, "写入新增事项请求失败", e)
         }
         WidgetBridge.notifyNewItem(context)
-        launchApp(context)
+        launchApp(context, openNewItem = true)
     }
 
     private fun handleOpenItem(context: Context, intent: Intent) {
@@ -90,11 +90,16 @@ class TodoWidgetProvider : AppWidgetProvider() {
         launchApp(context)
     }
 
-    private fun launchApp(context: Context) {
+    private fun launchApp(context: Context, openNewItem: Boolean = false) {
         val pm = context.packageManager
         var intent = pm.getLaunchIntentForPackage(context.packageName)
         if (intent == null) {
             intent = Intent().setClassName(context.packageName, "${context.packageName}.MainActivity")
+        }
+        if (openNewItem) {
+            // 除了 SharedPreferences 标记，再带一个 Intent extra：
+            // 应用启动/回到前台时由 WidgetPlugin 读 activity.intent，作为第二条可靠通道
+            intent.putExtra(EXTRA_OPEN_NEW_ITEM, true)
         }
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -119,6 +124,9 @@ class TodoWidgetProvider : AppWidgetProvider() {
 
         /** 点击右上角「+」新增事项的广播 action。 */
         const val ACTION_NEW_ITEM = "app.tauri.widget.ACTION_NEW_ITEM"
+
+        /** 拉起应用时附带的 extra：本次应打开「新增事项」（第二条可靠通道）。 */
+        const val EXTRA_OPEN_NEW_ITEM = "app.tauri.widget.EXTRA_OPEN_NEW_ITEM"
 
         private const val EXTRA_ITEM_ID = "item_id"
         private const val EXTRA_WIDGET_ID = "widget_id"
@@ -172,12 +180,21 @@ class TodoWidgetProvider : AppWidgetProvider() {
                 color(context, if (dark) R.color.widget_divider_dark else R.color.widget_divider_light))
             views.setInt(R.id.widget_title, "setTextColor", textColor)
             views.setInt(R.id.widget_count, "setTextColor", accent)
-            views.setInt(R.id.widget_add, "setTextColor", textColor)
             views.setInt(R.id.widget_footer, "setTextColor", subColor)
             views.setInt(R.id.widget_empty_text, "setTextColor", subColor)
-            // 右上角「+」：贴强调色圆底，点击 = 应用内「新增事项」
+            // 右上角「+」：贴强调色圆底 + 白色图标
+            // （图标用 vector + setImageViewResource；之前用 TextView 的「+」在圆底里
+            //   受字体度量影响不居中，也不好看）
             views.setInt(R.id.widget_add, "setBackgroundResource", R.drawable.widget_add_bg)
             views.setInt(R.id.widget_add, "setBackgroundColor", accent)
+            // 图标染色（白）是可选项：ImageView#setColorFilter 不带 @RemotableViewMethod，
+            // 一旦不受支持会抛 ActionException 让整次 apply 作废，所以单独兜底；
+            // 失败也不影响可用性（矢量图标本身就是白色）。
+            try {
+                views.setInt(R.id.widget_add, "setColorFilter", textColor)
+            } catch (e: Exception) {
+                Log.w(TAG, "「+」图标染色失败，使用默认白色", e)
+            }
             // 注意：这里**不能**用 setInt(..., "setColorFilter", ...) 给进度圈染色。
             // ImageView#setColorFilter 没有 @RemotableViewMethod 标注，
             // launcher 侧 ReflectionAction.apply() 会抛 ActionException，

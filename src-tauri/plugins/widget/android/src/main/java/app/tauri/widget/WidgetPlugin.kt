@@ -3,6 +3,7 @@ package app.tauri.widget
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -59,6 +60,7 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         WidgetBridge.setForeground(true)
         WidgetBridge.updateNow(activity.applicationContext)
         WidgetBridge.sync(force = true, persist = false)
+        checkLaunchIntentForNewItem()
     }
 
     override fun onPause() {
@@ -68,6 +70,32 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
     override fun onDestroy(activity: AppCompatActivity) {
         WidgetBridge.setForeground(false)
         WidgetBridge.detach(this)
+    }
+
+    /**
+     * 桌面点「+」拉起应用时（singleTask，走 onNewIntent），把「新增事项」请求补上。
+     * 这里再查一次 activity.intent，覆盖「应用已在运行」的窗口。
+     */
+    override fun onNewIntent(intent: Intent) {
+        checkLaunchIntentForNewItem()
+    }
+
+    /**
+     * 第二通道：桌面点「+」时我们给启动 Intent 带了 EXTRA_OPEN_NEW_ITEM。
+     * 冷启动读 activity.intent，已在运行则由 onNewIntent 更新 activity.intent，
+     * 因此每次回到前台都查一遍，比只靠 SharedPreferences 标记 + 事件更不容易丢。
+     */
+    private fun checkLaunchIntentForNewItem() {
+        try {
+            val intent = activity.intent ?: return
+            if (!intent.getBooleanExtra(TodoWidgetProvider.EXTRA_OPEN_NEW_ITEM, false)) return
+            // 消费掉，避免每次 onResume 重复触发
+            intent.removeExtra(TodoWidgetProvider.EXTRA_OPEN_NEW_ITEM)
+            WidgetPrefs.requestNewItem(activity.applicationContext)
+            WidgetBridge.notifyNewItem(activity.applicationContext)
+        } catch (e: Exception) {
+            // 读 Intent / 写标记失败都不应影响应用正常启动
+        }
     }
 
     /** 前端推送待办快照。 */
