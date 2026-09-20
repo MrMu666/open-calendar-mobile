@@ -81,14 +81,18 @@
             android:visibility="gone" />
     </LinearLayout>
 
-    <!-- 列表为空时：应用刷新中显示进度圈，否则提示暂无事项 -->
+    <!-- 空态 / 渲染报错文案：
+         用 match_parent + gravity=center，而不是 wrap_content + layout_gravity=center
+         —— 后者在 RemoteViews 里子文本没有宽度约束，会被压成 0 宽度，
+         桌面看起来完全空白（连渲染错误原因都显示不出来）。已踩坑。 -->
     <LinearLayout
         android:id="@+id/widget_empty"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:gravity="center_horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
         android:orientation="vertical"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
         android:visibility="gone">
 
         <!-- 不用 ?android:attr/progressBarStyleSmall：库布局在桌面进程 inflate，
@@ -103,9 +107,12 @@
 
         <TextView
             android:id="@+id/widget_empty_text"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="6dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="3"
             android:text="@string/widget_empty"
             android:textColor="@color/widget_subtext_dark"
             android:textSize="11sp" />

@@ -37,6 +37,12 @@ class TodoWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray
     ) {
+        // 探针写在最前：即使后面渲染失败，也能证明 provider 被系统拉起过
+        try {
+            WidgetPrefs.markProviderUpdate(context, appWidgetIds.size)
+        } catch (e: Exception) {
+            Log.w(TAG, "写入 onUpdate 探针失败", e)
+        }
         for (id in appWidgetIds) {
             try {
                 appWidgetManager.updateAppWidget(id, buildViewsSafe(context, id))
@@ -166,7 +172,11 @@ class TodoWidgetProvider : AppWidgetProvider() {
             views.removeAllViews(R.id.widget_items)
             val visible = payload.items.take(payload.limit)
             if (visible.isEmpty()) {
-                views.setTextViewText(R.id.widget_count, "")
+                // 自证：显示「已推送 N 条」——0 条说明数据没到原生侧，>0 条说明数据到了但没渲染出来
+                views.setTextViewText(
+                    R.id.widget_count,
+                    if (payload.updatedAt > 0) "已推送 ${payload.items.size} 条" else "未收到数据"
+                )
                 views.setViewVisibility(R.id.widget_items, View.GONE)
                 views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
                 // 渲染过报错时把原因直接显示在小组件上（launcher 进程的异常系统会吞，

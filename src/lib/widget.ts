@@ -127,9 +127,20 @@ export interface WidgetStatus {
   items: number;
   /** 最近一次渲染失败原因；空串 = 正常。 */
   lastError: string;
+  /** 探针：provider 侧 onUpdate 最近时间戳（0 = 系统从未调用该组件）。 */
+  providerUpdateAt: number;
+  /** 探针：provider 侧 onUpdate 收到的实例数。 */
+  providerUpdateIds: number;
 }
 
-const EMPTY_STATUS: WidgetStatus = { count: 0, attached: false, items: 0, lastError: '' };
+const EMPTY_STATUS: WidgetStatus = {
+  count: 0,
+  attached: false,
+  items: 0,
+  lastError: '',
+  providerUpdateAt: 0,
+  providerUpdateIds: 0,
+};
 
 /** 推送快照到原生并立即重绘桌面；失败返回 null（无插件/桌面端）。 */
 export async function pushWidget(payload: WidgetPayload): Promise<WidgetStatus | null> {

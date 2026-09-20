@@ -12,6 +12,14 @@ import FolderPicker, { EXTERNAL_ROOT } from './FolderPicker';
 /** 把原生侧状态转成给用户看的一行诊断文本。 */
 function describeWidgetStatus(status: WidgetStatus): string {
   const parts = [`桌面小组件 ${status.count} 个`, `已推送 ${status.items} 条`];
+  // 探针：区分「系统从未拉起组件」与「拉起了但渲染失败」
+  if (status.items > 0 || status.lastError) {
+    parts.push(
+      status.providerUpdateAt > 0
+        ? `组件已激活（收到 ${status.providerUpdateIds} 个实例）`
+        : '组件从未被系统激活',
+    );
+  }
   if (status.lastError) parts.push(`渲染报错：${status.lastError}`);
   return parts.join(' · ');
 }

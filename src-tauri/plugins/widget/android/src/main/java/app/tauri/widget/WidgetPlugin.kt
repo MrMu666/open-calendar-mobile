@@ -138,6 +138,9 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         out.put("attached", WidgetBridge.isAttached())
         out.put("items", WidgetPrefs.itemCount(context))
         out.put("lastError", WidgetPrefs.getLastError(context))
+        // 探针：provider（launcher 进程）是否被系统拉起过，用于区分「没跑」与「跑了但渲染失败」
+        out.put("providerUpdateAt", WidgetPrefs.lastProviderUpdateAt(context))
+        out.put("providerUpdateIds", WidgetPrefs.lastProviderUpdateIds(context))
         return out
     }
 }

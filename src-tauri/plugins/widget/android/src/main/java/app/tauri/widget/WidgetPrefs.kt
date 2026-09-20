@@ -24,6 +24,10 @@ object WidgetPrefs {
     private const val KEY_SYNCING_AT = "syncing_at"
     /** 最近一次渲染失败原因（空 = 正常），设置页据此诊断小组件空白问题。 */
     private const val KEY_LAST_ERROR = "last_error"
+    /** 探针：provider 侧最近一次 onUpdate 时间戳（0 = 从未被调用）。 */
+    private const val KEY_LAST_UPDATE_AT = "last_update_at"
+    /** 探针：provider 侧 onUpdate 收到的实例数。 */
+    private const val KEY_LAST_UPDATE_IDS = "last_update_ids"
 
     /** 同步标记最长有效期：超时后桌面不再显示进度圈。 */
     private const val SYNC_TIMEOUT_MS = 20_000L
@@ -222,6 +226,24 @@ object WidgetPrefs {
     }
 
     fun getLastError(context: Context): String = prefs(context).getString(KEY_LAST_ERROR, "") ?: ""
+
+    /**
+     * 探针：provider 侧 onUpdate 是否真的被系统调用过。
+     * 这一步写在最前面，即使后面渲染失败也能证明「组件已激活、代码已执行」，
+     * 用于区分「provider 没跑」与「跑了但渲染失败」。
+     */
+    fun markProviderUpdate(context: Context, widgetCount: Int) {
+        prefs(context).edit()
+            .putLong(KEY_LAST_UPDATE_AT, System.currentTimeMillis())
+            .putInt(KEY_LAST_UPDATE_IDS, widgetCount)
+            .apply()
+    }
+
+    /** 探针读数：provider 最近一次 onUpdate 时间（0 = 从未调用）。 */
+    fun lastProviderUpdateAt(context: Context): Long = prefs(context).getLong(KEY_LAST_UPDATE_AT, 0L)
+
+    /** 探针读数：provider 最近一次 onUpdate 收到的实例数。 */
+    fun lastProviderUpdateIds(context: Context): Int = prefs(context).getInt(KEY_LAST_UPDATE_IDS, 0)
 
     /** 已落盘快照的条目数（诊断用）。 */
     fun itemCount(context: Context): Int = load(context).items.size
