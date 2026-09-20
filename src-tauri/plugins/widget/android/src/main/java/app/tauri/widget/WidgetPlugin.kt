@@ -126,6 +126,22 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
+     * 取回并消费「新增事项」请求（点击小组件右上角 +）。
+     * 返回 newItem=true 时前端应打开新增事项编辑器（等同应用内「事项页 → 新增事项」）。
+     */
+    @Command
+    fun consumeNewItem(invoke: Invoke) {
+        try {
+            val requested = WidgetPrefs.consumeNewItemRequest(activity.applicationContext)
+            val out = result()
+            out.put("newItem", requested)
+            invoke.resolve(out)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "读取新增事项请求失败")
+        }
+    }
+
+    /**
      * 附带诊断信息：小组件实例数、已落盘条目数、最近一次渲染失败原因。
      * launcher 进程里的渲染异常会被系统吞掉（桌面只剩空白框架），只能这样回传出来定位。
      */
@@ -141,6 +157,8 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
         // 探针：provider（launcher 进程）是否被系统拉起过，用于区分「没跑」与「跑了但渲染失败」
         out.put("providerUpdateAt", WidgetPrefs.lastProviderUpdateAt(context))
         out.put("providerUpdateIds", WidgetPrefs.lastProviderUpdateIds(context))
+        // 只读展示：是否有待处理的「+」新增请求
+        out.put("newItem", WidgetPrefs.hasNewItemRequest(context))
         return out
     }
 }

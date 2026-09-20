@@ -1,12 +1,13 @@
 [default]
-description = "默认暴露全部桌面小组件命令（update 推送数据、refresh 强制重绘、pendingTap 取点击、clearPendingTap 清除点击）。"
+description = "默认暴露全部桌面小组件命令（update 推送数据、refresh 强制重绘、pendingTap 取点击、clearPendingTap 清除点击、consumeNewItem 消费「+」新增请求）。"
 # 注意：标识符由 tauri-utils 的 autogenerate_command_permissions 生成，
 # 只把命令名里的 `_` 换成 `-`（不做 kebab-case 转换），所以驼峰命令名的权限
-# 标识符同样是驼峰：`pendingTap` → `allow-pendingTap`。写错会直接编译失败
+# 标识符同样是驼峰：`consumeNewItem` → `allow-consumeNewItem`。写错会直接编译失败
 # （capabilities 里引用 widget:default 时会报 unknown permission）。
 permissions = [
   "allow-update",
   "allow-refresh",
   "allow-pendingTap",
   "allow-clearPendingTap",
+  "allow-consumeNewItem",
 ]

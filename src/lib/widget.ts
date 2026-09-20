@@ -19,6 +19,9 @@ export const WIDGET_LAUNCH_EVENT = 'widget://launch-item';
 /** 应用回到前台时原生请求重推数据的事件名（原生 WidgetBridge.EVENT_RESYNC）。 */
 export const WIDGET_RESYNC_EVENT = 'widget://resync';
 
+/** 点击小组件右上角「+」的事件名（原生 WidgetBridge.EVENT_NEW_ITEM）。 */
+export const WIDGET_NEW_ITEM_EVENT = 'widget://new-item';
+
 export type WidgetPhase = 'active' | 'done';
 
 /** 单条待办（与 Kotlin WidgetPrefs.WidgetItem 字段一一对应）。 */
@@ -197,6 +200,29 @@ export async function clearPendingTapId(): Promise<void> {
   }
 }
 
+/**
+ * 取回并消费一次「新增事项」请求（点击小组件右上角 +）。
+ * 返回 true = 本次应打开新增事项编辑器；无插件/未请求返回 false。
+ */
+export async function consumeNewItemRequest(): Promise<boolean> {
+  try {
+    const r = await invoke<{ newItem?: boolean }>(`${PLUGIN}|consumeNewItem`);
+    return !!r?.newItem;
+  } catch {
+    return false;
+  }
+}
+
+/** 只读：当前是否有未处理的「新增事项」请求（设置页诊断用）。 */
+export async function hasNewItemRequest(): Promise<boolean> {
+  try {
+    const r = await invoke<{ newItem?: boolean }>(`${PLUGIN}|pendingTap`, { clear: false });
+    return !!r?.newItem;
+  } catch {
+    return false;
+  }
+}
+
 /** 监听原生事件（应用存活时点击某条事项）；无插件时返回 no-op。 */
 export async function listenWidgetLaunch(
   handler: (id: number) => void,
@@ -215,6 +241,15 @@ export async function listenWidgetLaunch(
 export async function listenWidgetResync(handler: () => void): Promise<UnlistenFn> {
   try {
     return await listen(WIDGET_RESYNC_EVENT, () => handler());
+  } catch {
+    return () => undefined;
+  }
+}
+
+/** 监听原生「新增事项」事件（应用存活时点击小组件右上角 +）。 */
+export async function listenWidgetNewItem(handler: () => void): Promise<UnlistenFn> {
+  try {
+    return await listen(WIDGET_NEW_ITEM_EVENT, () => handler());
   } catch {
     return () => undefined;
   }

@@ -10,4 +10,6 @@
     <string name="widget_done_badge">OK</string>
     <string name="widget_more">+%1$d 项待办</string>
     <string name="widget_active_count">%1$d 项待办</string>
+    <!-- 右上角新增按钮（点击后打开应用内新增事项编辑器） -->
+    <string name="widget_add">+</string>
 </resources>

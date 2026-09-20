@@ -28,6 +28,8 @@ object WidgetPrefs {
     private const val KEY_LAST_UPDATE_AT = "last_update_at"
     /** 探针：provider 侧 onUpdate 收到的实例数。 */
     private const val KEY_LAST_UPDATE_IDS = "last_update_ids"
+    /** 桌面点击「+」：请求应用打开新增事项编辑器。 */
+    private const val KEY_NEW_ITEM = "pending_new_item"
 
     /** 同步标记最长有效期：超时后桌面不再显示进度圈。 */
     private const val SYNC_TIMEOUT_MS = 20_000L
@@ -215,6 +217,25 @@ object WidgetPrefs {
     fun clearPendingTap(context: Context) {
         prefs(context).edit().remove(KEY_PENDING).remove(KEY_PENDING_AT).apply()
     }
+
+    /** 桌面点击「+」：登记一次「新增事项」请求（与点击某条事项互斥：会清掉 pending_tap）。 */
+    fun requestNewItem(context: Context) {
+        prefs(context).edit()
+            .putBoolean(KEY_NEW_ITEM, true)
+            .remove(KEY_PENDING)
+            .apply()
+    }
+
+    /** 取回并清除「新增事项」请求；未请求返回 false。 */
+    fun consumeNewItemRequest(context: Context): Boolean {
+        val p = prefs(context)
+        if (!p.getBoolean(KEY_NEW_ITEM, false)) return false
+        p.edit().remove(KEY_NEW_ITEM).apply()
+        return true
+    }
+
+    /** 只读：是否有未处理的「新增事项」请求。 */
+    fun hasNewItemRequest(context: Context): Boolean = prefs(context).getBoolean(KEY_NEW_ITEM, false)
 
     /**
      * 记录/清除最近一次渲染失败原因。

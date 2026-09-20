@@ -30,6 +30,9 @@ object WidgetBridge {
     /** 请求前端重新推送数据的事件（onResume 等场景）。 */
     const val EVENT_RESYNC = "widget://resync"
 
+    /** 前端打开「新增事项」编辑器的事件（点击小组件右上角 +）。 */
+    const val EVENT_NEW_ITEM = "widget://new-item"
+
     @Volatile
     private var plugin: Plugin? = null
 
@@ -130,4 +133,23 @@ object WidgetBridge {
             Log.w(TAG, "下发小组件点击事件失败", e)
         }
     }
+
+    /** 点击「+」后：应用存活且有监听时直接下发新增事件（前端立即开新增编辑器）。 */
+    fun notifyNewItem(context: Context) {
+        val current = plugin ?: return
+        if (!hasNewItemListener()) return
+        if (!WidgetPrefs.hasNewItemRequest(context)) return
+        try {
+            current.trigger(EVENT_NEW_ITEM, JSObject())
+        } catch (e: Exception) {
+            Log.w(TAG, "下发新增事项事件失败", e)
+        }
+    }
+
+    fun hasNewItemListener(): Boolean =
+        try {
+            plugin?.hasListener(EVENT_NEW_ITEM) == true
+        } catch (e: Exception) {
+            false
+        }
 }

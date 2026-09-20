@@ -7,6 +7,7 @@ import {
   refreshWidget,
   takePendingTapId,
   clearPendingTapId,
+  consumeNewItemRequest,
   widgetItemId,
   widgetStatus,
   type WidgetStatus,
@@ -114,4 +115,12 @@ export async function consumePendingWidgetTap(): Promise<ScheduleEvent | null> {
   // 无论是否命中都清除：避免反复弹出已不存在的事项
   await clearPendingTapId();
   return hit;
+}
+
+/**
+ * 消费一次小组件右上角「+」的新增请求。
+ * 返回 true = 应用应打开新增事项编辑器（等同应用内「事项页 → 新增事项」）。
+ */
+export async function consumeWidgetNewItem(): Promise<boolean> {
+  return consumeNewItemRequest();
 }

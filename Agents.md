@@ -11,7 +11,8 @@
 - 编辑器：底部弹层，标题/开始/截止时间、标签、优先级、Markdown 内容
 - 设置：亮色/暗色主题切换（默认亮色）、强调色、自定义数据存储目录（appData 子目录 或
   外部绝对路径，后者需 Android 所有文件访问权限；桌面端的"开机自启/背景色/透明度"在移动端无对应项）
-- 安卓桌面小组件：3×4 半透明待办卡片（原生 RemoteViews），点击某条直接打开对应事项
+- 安卓桌面小组件：3×4 半透明待办卡片（原生 RemoteViews），右上角「+」新增事项，
+  点击某条直接打开对应事项
 
 ## 技术栈
 
@@ -119,6 +120,11 @@ src-tauri/
   写入 `pending_tap` → 拉起 MainActivity；应用存活时 `WidgetBridge` 直接发
   `widget://launch-item`（前端 `listen` 到就开编辑器），否则前端轮询
   `plugin:widget|pendingTap` 兜底（`visibilitychange` 时消费）。
+- **右上角「+」= 应用内「事项页 → 新增事项」**（无日期文案）：点「+」广播
+  `ACTION_NEW_ITEM` → 写入 `pending_new_item` → 拉起应用；应用存活时原生发
+  `widget://new-item`，前端 `consumeNewItem` 消费后 `setEditor({existing:null})`，
+  与事项页 `onNew` 完全同一条路径。冷启动时事件可能早于前端注册监听，
+  所以 `pending_new_item` 标记必须保留到前端消费（`consumeNewItemRequest` 才清除）。
 - 点击回传靠 **id 哈希**：前端 `widgetItemId(fileName)` 必须与 `store.ts` 的 `makeId`
   逐位一致（Kotlin 侧只透传不计算），否则点开的是别的事项。
 - 尺寸：3 列 × 4 行（`targetCellWidth/Height` + `minWidth=250dp`/`minHeight=220dp`，
@@ -141,6 +147,18 @@ src-tauri/
   已确认可用：`View.setBackgroundResource`、`View.setBackgroundColor`、`TextView.setTextColor`；
   **不可用**：`ImageView.setColorFilter`（已踩此坑——进度圈染色导致整个小组件空白）。
   要改颜色用预置 drawable/color 资源，不要用反射式 setInt 调未标注方法。
+  同类风险：跨进程传 `SpannableString`（删除线）也属非标准用法，已改为纯文本 + 颜色区分。
+- **小组件空白问题的排障套路（已跑通一遍，别再靠猜）**：
+  1. 先用 `aapt2 dump xmltree --file AndroidManifest.xml <apk>` / `dump resources` 确认
+     receiver、`appwidget-provider`（`initialLayout`）、布局与 drawable 都进了包
+     （发布包里 XML 资源名会被混淆成 `res/S-.xml` 之类，按内容关键字找文件）；
+  2. 再用「探针」区分「provider 没被系统拉起」还是「拉起了但 apply 失败」：
+     `onUpdate` 第一行写 `last_update_at`/`last_update_ids`，
+     `buildViewsSafe` 捕获异常写 `last_error`，两者都通过插件命令回传，
+     设置页「桌面小组件」区块直接显示（无 logcat 也能定位）；
+  3. 空态/错误文案的 TextView **必须 `match_parent` + `gravity=center`**：
+     原来用 `wrap_content` + `layout_gravity=center` 时子文本没有宽度约束会被压成
+     0 宽度，桌面看起来完全空白、连报错都显示不出来（已踩坑）。
 - **Tauri Kotlin API 版本敏感点（改这块前先看 `~/.cargo/registry/.../tauri-<ver>/mobile/android/...` 源码）**：
   - `Plugin` 只有**无参** `onPause()` / `onResume()`（`onDestroy`/`onRestart` 才带
     `AppCompatActivity` 参数）——写成 `override fun onResume(activity: AppCompatActivity)`
@@ -206,7 +224,7 @@ src-tauri/
 - `fs:scope` 放行 `/storage/emulated/0` 及其下所有（`/**/*` 覆盖不到根目录本身，
   FolderPicker 首屏依赖它；SD 卡等其他挂载点不在范围内，选了会监听失败）
 - `all-files-access:default`（本地插件：授权查询 + 跳设置页）
-- `widget:default`（本地插件：桌面小组件 update / refresh / pendingTap / clearPendingTap）
+- `widget:default`（本地插件：桌面小组件 update / refresh / pendingTap / clearPendingTap / consumeNewItem）
 - `core:default`、`opener:default`
 - **不要随意收紧/放宽**：前端所有 IO 都走这些权限；Android 上 `$APPDATA` 即应用私有目录。
 

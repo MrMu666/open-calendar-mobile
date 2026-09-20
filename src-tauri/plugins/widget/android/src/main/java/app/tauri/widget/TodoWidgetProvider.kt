@@ -56,6 +56,10 @@ class TodoWidgetProvider : AppWidgetProvider() {
             handleOpenItem(context, intent)
             return
         }
+        if (ACTION_NEW_ITEM == action) {
+            handleNewItem(context)
+            return
+        }
         if (ACTION_RESYNC == action) {
             // 系统重启/桌面恢复小组件，或应用启动时：先重绘 + 请求前端推新数据
             WidgetBridge.updateNow(context)
@@ -63,6 +67,17 @@ class TodoWidgetProvider : AppWidgetProvider() {
             return
         }
         super.onReceive(context, intent)
+    }
+
+    /** 右上角「+」：登记新增请求 → 拉起应用（应用存活时另发事件，前端立即开编辑器）。 */
+    private fun handleNewItem(context: Context) {
+        try {
+            WidgetPrefs.requestNewItem(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "写入新增事项请求失败", e)
+        }
+        WidgetBridge.notifyNewItem(context)
+        launchApp(context)
     }
 
     private fun handleOpenItem(context: Context, intent: Intent) {
@@ -102,7 +117,14 @@ class TodoWidgetProvider : AppWidgetProvider() {
         /** 请求应用重推数据的广播 action。 */
         const val ACTION_RESYNC = "app.tauri.widget.ACTION_RESYNC"
 
+        /** 点击右上角「+」新增事项的广播 action。 */
+        const val ACTION_NEW_ITEM = "app.tauri.widget.ACTION_NEW_ITEM"
+
         private const val EXTRA_ITEM_ID = "item_id"
+        private const val EXTRA_WIDGET_ID = "widget_id"
+
+        /** 「+」按钮的 PendingIntent requestCode 基址，避开事项行（appWidgetId*100+index）。 */
+        private const val ADD_REQUEST_CODE_BASE = 900_000
 
         private const val META_MAX_CHARS = 14
         private const val TITLE_MAX_CHARS = 22
@@ -150,9 +172,12 @@ class TodoWidgetProvider : AppWidgetProvider() {
                 color(context, if (dark) R.color.widget_divider_dark else R.color.widget_divider_light))
             views.setInt(R.id.widget_title, "setTextColor", textColor)
             views.setInt(R.id.widget_count, "setTextColor", accent)
-            views.setInt(R.id.widget_date, "setTextColor", subColor)
+            views.setInt(R.id.widget_add, "setTextColor", textColor)
             views.setInt(R.id.widget_footer, "setTextColor", subColor)
             views.setInt(R.id.widget_empty_text, "setTextColor", subColor)
+            // 右上角「+」：贴强调色圆底，点击 = 应用内「新增事项」
+            views.setInt(R.id.widget_add, "setBackgroundResource", R.drawable.widget_add_bg)
+            views.setInt(R.id.widget_add, "setBackgroundColor", accent)
             // 注意：这里**不能**用 setInt(..., "setColorFilter", ...) 给进度圈染色。
             // ImageView#setColorFilter 没有 @RemotableViewMethod 标注，
             // launcher 侧 ReflectionAction.apply() 会抛 ActionException，
@@ -161,7 +186,7 @@ class TodoWidgetProvider : AppWidgetProvider() {
 
             val now = System.currentTimeMillis()
             views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_name))
-            views.setTextViewText(R.id.widget_date, dayText(context, Date(now)))
+            // 原先右上角显示「今天」，改为「+」新增按钮（相对时间移到每条事项上）
 
             // 事项行：可见条数受 limit 限制（widgets 大小决定，设置页可调）
             views.removeAllViews(R.id.widget_items)
@@ -210,10 +235,19 @@ class TodoWidgetProvider : AppWidgetProvider() {
             } else {
                 views.setViewVisibility(R.id.widget_footer, View.GONE)
             }
-            // 点击空白区域（非事项行）直接打开应用
+            // 点击空白区域（非事项行、非「+」）直接打开应用
             val openIntent = Intent(context, TodoWidgetProvider::class.java).setAction(ACTION_RESYNC)
             views.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getBroadcast(
                 context, appWidgetId, openIntent, pendingFlags()))
+
+            // 右上角「+」：等同应用内「事项页 → 新增事项」
+            val addIntent = Intent(context, TodoWidgetProvider::class.java)
+                .setAction(ACTION_NEW_ITEM)
+                .putExtra(EXTRA_WIDGET_ID, appWidgetId)
+            views.setOnClickPendingIntent(
+                R.id.widget_add,
+                PendingIntent.getBroadcast(context, ADD_REQUEST_CODE_BASE + appWidgetId, addIntent, pendingFlags())
+            )
 
             return views
         }

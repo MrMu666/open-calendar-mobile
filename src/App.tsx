@@ -5,10 +5,11 @@ import { isAllFilesAccessGranted } from './lib/allFilesAccess';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type UserSettings } from './lib/settings';
 import {
   consumePendingWidgetTap,
+  consumeWidgetNewItem,
   resetWidgetFingerprint,
   syncWidget,
 } from './lib/widgetSync';
-import { listenWidgetLaunch, listenWidgetResync } from './lib/widget';
+import { listenWidgetLaunch, listenWidgetNewItem, listenWidgetResync } from './lib/widget';
 import CalendarView from './components/CalendarView';
 import TasksView from './components/TasksView';
 import SettingsView from './components/SettingsView';
@@ -65,6 +66,23 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * 消费一次小组件右上角「+」的新增请求：打开新增事项编辑器，
+   * 与「事项页 → 新增事项」完全同一条路径（onNew = openEditor(null)）。
+   */
+  const consumeWidgetNew = useCallback(async (): Promise<void> => {
+    if (!storeReady.current || consumingTap.current) return;
+    consumingTap.current = true;
+    try {
+      const requested = await consumeWidgetNewItem();
+      if (requested) {
+        setEditor({ existing: null });
+      }
+    } finally {
+      consumingTap.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     store.onItemsChanged = refresh;
     store.onChange = refresh;
@@ -92,12 +110,14 @@ export default function App() {
       void syncWidget(true);
       // 若本次是被桌面小组件点击拉起的，补上这次点击（此时缓存已就绪，能定位事项）
       void consumeWidgetTap(true);
+      // 也可能是点了右上角「+」拉起的：补开新增编辑器
+      void consumeWidgetNew();
     });
     return () => {
       store.onItemsChanged = null;
       store.onChange = null;
     };
-  }, [refresh, consumeWidgetTap]);
+  }, [refresh, consumeWidgetTap, consumeWidgetNew]);
 
   // 桌面小组件事件：点击某条事项（应用存活时原生直接下发）+ 回到前台时请求重推数据
   useEffect(() => {
@@ -106,6 +126,14 @@ export default function App() {
 
     void listenWidgetLaunch(() => {
       void consumeWidgetTap();
+    }).then((un) => {
+      if (disposed) un();
+      else unlisteners.push(un);
+    });
+
+    // 右上角「+」：应用存活时原生直接下发，立即打开新增事项编辑器
+    void listenWidgetNewItem(() => {
+      void consumeWidgetNew();
     }).then((un) => {
       if (disposed) un();
       else unlisteners.push(un);
@@ -122,17 +150,18 @@ export default function App() {
       disposed = true;
       for (const un of unlisteners) un();
     };
-  }, [consumeWidgetTap]);
+  }, [consumeWidgetTap, consumeWidgetNew]);
 
-  // 兜底：页面重新可见（从桌面点击拉起，但原生事件丢失）时消费一次待打开事项
+  // 兜底：页面重新可见（从桌面点击拉起，但原生事件丢失）时消费一次待处理请求
   useEffect(() => {
     const onVisible = (): void => {
       if (document.visibilityState !== 'visible') return;
       void consumeWidgetTap();
+      void consumeWidgetNew();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [consumeWidgetTap]);
+  }, [consumeWidgetTap, consumeWidgetNew]);
 
   const updateSettings = useCallback((patch: Partial<UserSettings>) => {
     setSettings((prev) => {

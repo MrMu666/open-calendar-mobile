@@ -10,6 +10,7 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <!-- 自定义 action 与 PendingIntent 都是显式组件调用，这里声明只为完整/可被外部触发 -->
                 <action android:name="app.tauri.widget.ACTION_OPEN_ITEM" />
+                <action android:name="app.tauri.widget.ACTION_NEW_ITEM" />
                 <action android:name="app.tauri.widget.ACTION_RESYNC" />
             </intent-filter>
             <meta-data
